@@ -6,17 +6,14 @@
 #include <regex>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
-
 #include <malloc.h> // using malloc.h with MSC/MINGW
-
 #elif !defined(__FreeBSD__) && !defined(__NetBSD__)
 #include <alloca.h>
 #endif
 
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #include <windows.h>
-
 using namespace std;
-
 string utf8_to_ascii(const char *cont) {
     if (NULL == cont) {
         return string("");
@@ -33,7 +30,6 @@ string utf8_to_ascii(const char *cont) {
     delete[] lpsz;
     return rtn;
 }
-
 string ascii_to_utf8(const char *cont) {
     if (NULL == cont) {
         return string("");
@@ -54,6 +50,25 @@ string ascii_to_utf8(const char *cont) {
     delete[] lpsz;
     return rtn;
 }
+#else
+# 以下未经过测试
+#include <iostream>
+#include <string>
+#include <locale>
+#include <codecvt>
+// 将 ASCII 字符串转换为 UTF-8 字符串
+std::string ascii_to_utf8(const std::string& ascii) {
+    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
+    std::u16string u16str = converter.from_bytes(ascii);
+    return converter.to_bytes(u16str);
+}
+// 将 UTF-8 字符串转换为 ASCII 字符串
+std::string utf8_to_ascii(const std::string& utf8) {
+    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
+    std::u16string u16str = converter.from_bytes(utf8);
+    return converter.to_bytes(u16str);
+}
+#endif
 
 bool gpt_params_parse(int argc, char **argv, gpt_params &params) {
     for (int i = 1; i < argc; i++) {
@@ -66,7 +81,11 @@ bool gpt_params_parse(int argc, char **argv, gpt_params &params) {
         } else if (arg == "-d" || arg == "--debug") {
             params.prompt = (argv[++i]); // 输入为utf-8字符串，不用转码
         } else if (arg == "-p" || arg == "--prompt") {
+#if defined(_MSC_VER) || defined(__MINGW32__)
             params.prompt = ascii_to_utf8(argv[++i]); // 输入为ascii码，需要转码
+#else
+            params.prompt = (argv[++i]);
+#endif
         } else if (arg == "-n" || arg == "--n_predict") {
             params.n_predict = std::stoi(argv[++i]);
         } else if (arg == "--top_k") {
