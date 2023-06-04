@@ -1,3 +1,24 @@
+# Improved	
+
+Forked from [NouamaneTazi/bloomz.cpp](https://github.com/NouamaneTazi/bloomz.cpp)，support all Chinese.
+
+## Convert to ggml model
+
+```shell
+$ python convert-bloom-to-ggml.py WangZeJun/bloom-396m-chat ./models 
+```
+
+## Run inference
+
+```shell
+$ main.exe -p "面包的烘焙过程"
+$ main.exe -p "擀面杖是干什么的"
+```
+
+Currently, only windows is supported,  because of the ascii and utf-8 conversions.
+
+------
+
 # bloomz.cpp
 
 Inference of HuggingFace's [BLOOM-like](https://huggingface.co/docs/transformers/model_doc/bloom) models in pure C/C++.

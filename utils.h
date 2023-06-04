@@ -15,7 +15,7 @@
 struct gpt_params {
     int32_t seed      = -1; // RNG seed
     int32_t n_threads = std::min(4, (int32_t) std::thread::hardware_concurrency());
-    int32_t n_predict = 128; // new tokens to predict
+    int32_t n_predict = 512; // new tokens to predict
     int32_t repeat_last_n = 64;  // last n tokens to penalize
 
     // sampling parameters
@@ -41,7 +41,7 @@ std::string gpt_random_prompt(std::mt19937 & rng);
 //
 
 struct gpt_vocab {
-    using id    = int32_t;
+    using id    = uint32_t;
     using token = std::string;
 
     std::map<token, id> token_to_id;
@@ -51,7 +51,7 @@ struct gpt_vocab {
 void replace(std::string & str, const std::string & needle, const std::string & replacement);
 
 // poor-man's JSON parsing
-std::map<std::string, int32_t> json_parse(const std::string & fname);
+std::map<std::string, uint32_t> json_parse(const std::string & fname);
 
 // split text into tokens
 //

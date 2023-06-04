@@ -15,66 +15,69 @@
 #include <signal.h>
 #include <unistd.h>
 #elif defined (_WIN32)
+
 #include <signal.h>
+
 #endif
 
 struct bloom_hparams {
     int32_t n_vocab = 32000;
-    int32_t n_ctx   = 512;   // this is provided as user input?
-    int32_t n_embd  = 4096;
-    int32_t n_mult  = 256;
-    int32_t n_head  = 32;
+    int32_t n_lack_words = 32000;
+    int32_t n_ctx = 512;   // this is provided as user input?
+    int32_t n_embd = 4096;
+    int32_t n_mult = 256;
+    int32_t n_head = 32;
     int32_t n_layer = 32;
-    int32_t f16     = 1;
+    int32_t f16 = 1;
 };
 
 struct bloom_layer {
     // normalization
-    struct ggml_tensor * attention_norm;
-    struct ggml_tensor * attention_norm_b;
+    struct ggml_tensor *attention_norm;
+    struct ggml_tensor *attention_norm_b;
 
     // attention
-    struct ggml_tensor * query_key_value;
-    struct ggml_tensor * query_key_value_b;
-    struct ggml_tensor * wo;
-    struct ggml_tensor * wo_b;
+    struct ggml_tensor *query_key_value;
+    struct ggml_tensor *query_key_value_b;
+    struct ggml_tensor *wo;
+    struct ggml_tensor *wo_b;
 
     // normalization
-    struct ggml_tensor * ffn_norm;
-    struct ggml_tensor * ffn_norm_b;
+    struct ggml_tensor *ffn_norm;
+    struct ggml_tensor *ffn_norm_b;
 
     // ff
-    struct ggml_tensor * w1;
-    struct ggml_tensor * w1_b;
-    struct ggml_tensor * w2;
-    struct ggml_tensor * w2_b;
+    struct ggml_tensor *w1;
+    struct ggml_tensor *w1_b;
+    struct ggml_tensor *w2;
+    struct ggml_tensor *w2_b;
 };
 
 struct bloom_model {
     bloom_hparams hparams;
 
-    struct ggml_tensor * tok_embeddings;
-    struct ggml_tensor * norm;
-    struct ggml_tensor * norm_b;
+    struct ggml_tensor *tok_embeddings;
+    struct ggml_tensor *norm;
+    struct ggml_tensor *norm_b;
 
-    struct ggml_tensor * output_norm;
-    struct ggml_tensor * output_norm_b;
-    struct ggml_tensor * output;
-    
+    struct ggml_tensor *output_norm;
+    struct ggml_tensor *output_norm_b;
+    struct ggml_tensor *output;
+
 
     std::vector<bloom_layer> layers;
 
     // key + value memory
-    struct ggml_tensor * memory_k;
-    struct ggml_tensor * memory_v;
+    struct ggml_tensor *memory_k;
+    struct ggml_tensor *memory_v;
 
     //
-    struct ggml_context * ctx;
+    struct ggml_context *ctx;
     std::map<std::string, struct ggml_tensor *> tensors;
 };
 
 // load the model's weights from a file
-bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab & vocab, int n_ctx) {
+bool bloom_model_load(const std::string &fname, bloom_model &model, gpt_vocab &vocab, gpt_vocab &lack_words, int n_ctx) {
     printf("%s: loading model from '%s' - please wait ...\n", __func__, fname.c_str());
 
     auto fin = std::ifstream(fname, std::ios::binary);
@@ -98,23 +101,25 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
     // load hparams
     {
-        auto & hparams = model.hparams;
+        auto &hparams = model.hparams;
 
         fin.read((char *) &hparams.n_vocab, sizeof(hparams.n_vocab));
+        fin.read((char *) &hparams.n_lack_words, sizeof(hparams.n_lack_words));
         //fin.read((char *) &hparams.n_ctx,   sizeof(hparams.n_ctx));
-        fin.read((char *) &hparams.n_embd,  sizeof(hparams.n_embd));
-        fin.read((char *) &hparams.n_mult,  sizeof(hparams.n_mult));
-        fin.read((char *) &hparams.n_head,  sizeof(hparams.n_head));
+        fin.read((char *) &hparams.n_embd, sizeof(hparams.n_embd));
+        fin.read((char *) &hparams.n_mult, sizeof(hparams.n_mult));
+        fin.read((char *) &hparams.n_head, sizeof(hparams.n_head));
         fin.read((char *) &hparams.n_layer, sizeof(hparams.n_layer));
-        fin.read((char *) &hparams.f16,     sizeof(hparams.f16));
+        fin.read((char *) &hparams.f16, sizeof(hparams.f16));
 
         hparams.n_ctx = n_ctx;
 
-        n_ff = ((4*hparams.n_embd + hparams.n_mult - 1)/hparams.n_mult)*hparams.n_mult;
+        n_ff = ((4 * hparams.n_embd + hparams.n_mult - 1) / hparams.n_mult) * hparams.n_mult;
         // n_parts = BLOOM_N_PARTS.at(hparams.n_embd);
         n_parts = 1;
 
         printf("%s: n_vocab = %d\n", __func__, hparams.n_vocab);
+        printf("%s: n_lack_word = %d\n", __func__, hparams.n_lack_words);
         printf("%s: n_ctx   = %d\n", __func__, hparams.n_ctx);
         printf("%s: n_embd  = %d\n", __func__, hparams.n_embd);
         printf("%s: n_mult  = %d\n", __func__, hparams.n_mult);
@@ -137,18 +142,49 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
         std::string word;
         for (int i = 0; i < n_vocab; i++) {
+
+            uint32_t id;
+            fin.read((char *) &id, sizeof(id));
+
             uint32_t len;
             fin.read((char *) &len, sizeof(len));
 
             word.resize(len);
             fin.read((char *) word.data(), len);
 
-            vocab.token_to_id[word] = i;
-            vocab.id_to_token[i] = word;
+            vocab.token_to_id[word] = id;
+            vocab.id_to_token[id] = word;
 
-            //if (i < 30000) {
-            //    printf("%s: vocab[%d] = '%s'\n", __func__, i, word.c_str());
-            //}
+//            if (i > 92000) {
+//                printf("%s: vocab[%d] = '%s'\n", __func__, i, word.c_str());
+//            }
+        }
+    }
+
+    // load lack_word
+    {
+        const int32_t n_lack_word = model.hparams.n_lack_words;
+
+        if (n_lack_word != model.hparams.n_lack_words) {
+            fprintf(stderr, "%s: invalid model file '%s' (bad vocab size %d != %d)\n",
+                    __func__, fname.c_str(), n_lack_word, model.hparams.n_lack_words);
+            return false;
+        }
+
+        std::string word;
+        for (int i = 0; i < n_lack_word; i++) {
+
+            uint32_t id;
+            fin.read((char *) &id, sizeof(id));
+
+            uint32_t len;
+            fin.read((char *) &len, sizeof(len));
+
+            word.resize(len);
+            fin.read((char *) word.data(), len);
+
+            lack_words.token_to_id[word] = id;
+            lack_words.id_to_token[id] = word;
         }
     }
 
@@ -156,71 +192,78 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
     // in order to save memory and also to speed up the computation
     ggml_type wtype = GGML_TYPE_COUNT;
     switch (model.hparams.f16) {
-        case 0: wtype = GGML_TYPE_F32;  break;
-        case 1: wtype = GGML_TYPE_F16;  break;
-        case 2: wtype = GGML_TYPE_Q4_0; break;
-        case 3: wtype = GGML_TYPE_Q4_1; break;
-        default:
-                {
-                    fprintf(stderr, "%s: invalid model file '%s' (bad f16 value %d)\n",
-                            __func__, fname.c_str(), model.hparams.f16);
-                    return false;
-                }
+        case 0:
+            wtype = GGML_TYPE_F32;
+            break;
+        case 1:
+            wtype = GGML_TYPE_F16;
+            break;
+        case 2:
+            wtype = GGML_TYPE_Q4_0;
+            break;
+        case 3:
+            wtype = GGML_TYPE_Q4_1;
+            break;
+        default: {
+            fprintf(stderr, "%s: invalid model file '%s' (bad f16 value %d)\n",
+                    __func__, fname.c_str(), model.hparams.f16);
+            return false;
+        }
     }
 
     const ggml_type wtype2 = GGML_TYPE_F32;
 
-    auto & ctx = model.ctx;
+    auto &ctx = model.ctx;
 
     size_t ctx_size = 0;
 
     {
-        const auto & hparams = model.hparams;
+        const auto &hparams = model.hparams;
 
-        const int n_embd  = hparams.n_embd;
+        const int n_embd = hparams.n_embd;
         const int n_layer = hparams.n_layer;
-        const int n_ctx   = hparams.n_ctx;
+        const int n_ctx = hparams.n_ctx;
         const int n_vocab = hparams.n_vocab;
 
-        ctx_size += n_embd*n_vocab*ggml_type_sizef(wtype); // tok_embeddings
+        ctx_size += n_embd * n_vocab * ggml_type_sizef(wtype); // tok_embeddings
 
-        ctx_size += n_embd*ggml_type_sizef(GGML_TYPE_F32); // norm
-        ctx_size += n_embd*ggml_type_sizef(GGML_TYPE_F32); // norm_b
+        ctx_size += n_embd * ggml_type_sizef(GGML_TYPE_F32); // norm
+        ctx_size += n_embd * ggml_type_sizef(GGML_TYPE_F32); // norm_b
 
-        ctx_size += n_embd*ggml_type_sizef(GGML_TYPE_F32); // output_norm
-        ctx_size += n_embd*ggml_type_sizef(GGML_TYPE_F32); // output_norm_b
+        ctx_size += n_embd * ggml_type_sizef(GGML_TYPE_F32); // output_norm
+        ctx_size += n_embd * ggml_type_sizef(GGML_TYPE_F32); // output_norm_b
 
-        ctx_size += n_embd*n_vocab*ggml_type_sizef(wtype); // output
+        ctx_size += n_embd * n_vocab * ggml_type_sizef(wtype); // output
 
-        ctx_size += n_layer*(n_embd*ggml_type_sizef(GGML_TYPE_F32)); // attention_norm
-        ctx_size += n_layer*(n_embd*ggml_type_sizef(GGML_TYPE_F32)); // attention_norm_b
+        ctx_size += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // attention_norm
+        ctx_size += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // attention_norm_b
 
-        ctx_size += n_layer*(3*n_embd*n_embd*ggml_type_sizef(wtype)); // query_key_value
-        ctx_size += n_layer*(3*n_embd*ggml_type_sizef(GGML_TYPE_F32)); // query_key_value_b
-        ctx_size += n_layer*(n_embd*n_embd*ggml_type_sizef(wtype)); // wo
-        ctx_size += n_layer*(n_embd*ggml_type_sizef(GGML_TYPE_F32)); // wo_b
+        ctx_size += n_layer * (3 * n_embd * n_embd * ggml_type_sizef(wtype)); // query_key_value
+        ctx_size += n_layer * (3 * n_embd * ggml_type_sizef(GGML_TYPE_F32)); // query_key_value_b
+        ctx_size += n_layer * (n_embd * n_embd * ggml_type_sizef(wtype)); // wo
+        ctx_size += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // wo_b
 
-        ctx_size += n_layer*(n_embd*ggml_type_sizef(GGML_TYPE_F32)); // ffn_norm
-        ctx_size += n_layer*(n_embd*ggml_type_sizef(GGML_TYPE_F32)); // ffn_norm_b
+        ctx_size += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // ffn_norm
+        ctx_size += n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32)); // ffn_norm_b
 
-        ctx_size += n_layer*(n_ff*n_embd*ggml_type_sizef(wtype)); // w1
-        ctx_size += n_layer*(n_ff*ggml_type_sizef(GGML_TYPE_F32)); // w1_b
-        ctx_size += n_layer*(n_ff*n_embd*ggml_type_sizef(wtype)); // w2
-        ctx_size += n_layer*(n_ff*ggml_type_sizef(GGML_TYPE_F32)); // w2_b
+        ctx_size += n_layer * (n_ff * n_embd * ggml_type_sizef(wtype)); // w1
+        ctx_size += n_layer * (n_ff * ggml_type_sizef(GGML_TYPE_F32)); // w1_b
+        ctx_size += n_layer * (n_ff * n_embd * ggml_type_sizef(wtype)); // w2
+        ctx_size += n_layer * (n_ff * ggml_type_sizef(GGML_TYPE_F32)); // w2_b
 
-        ctx_size += n_ctx*n_layer*n_embd*ggml_type_sizef(GGML_TYPE_F32); // memory_k
-        ctx_size += n_ctx*n_layer*n_embd*ggml_type_sizef(GGML_TYPE_F32); // memory_v
+        ctx_size += n_ctx * n_layer * n_embd * ggml_type_sizef(GGML_TYPE_F32); // memory_k
+        ctx_size += n_ctx * n_layer * n_embd * ggml_type_sizef(GGML_TYPE_F32); // memory_v
 
-        ctx_size += (5 + 10*n_layer)*256; // object overhead TODO:
+        ctx_size += (5 + 10 * n_layer) * 256; // object overhead TODO:
 
-        printf("%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size/(1024.0*1024.0));
+        printf("%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size / (1024.0 * 1024.0));
     }
 
     // create the ggml context
     {
         struct ggml_init_params params = {
-            /*.mem_size   =*/ ctx_size,
-            /*.mem_buffer =*/ NULL,
+                /*.mem_size   =*/ ctx_size,
+                /*.mem_buffer =*/ NULL,
         };
 
         model.ctx = ggml_init(params);
@@ -232,49 +275,49 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
     // prepare memory for the weights
     {
-        const auto & hparams = model.hparams;
+        const auto &hparams = model.hparams;
 
-        const int n_embd  = hparams.n_embd;
+        const int n_embd = hparams.n_embd;
         const int n_layer = hparams.n_layer;
-        const int n_ctx   = hparams.n_ctx;
+        const int n_ctx = hparams.n_ctx;
         const int n_vocab = hparams.n_vocab;
 
         model.layers.resize(n_layer);
 
         model.tok_embeddings = ggml_new_tensor_2d(ctx, wtype, n_embd, n_vocab);
-        model.norm   = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
+        model.norm = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
         model.norm_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
 
         model.output_norm = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
         model.output_norm_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
-        model.output = ggml_new_tensor_2d(ctx, wtype,         n_embd, n_vocab);
+        model.output = ggml_new_tensor_2d(ctx, wtype, n_embd, n_vocab);
 
         // map by name
         model.tensors["tok_embeddings.weight"] = model.tok_embeddings;
-        model.tensors["norm.weight"]   = model.norm;
-        model.tensors["norm.bias"]   = model.norm_b;
-        
+        model.tensors["norm.weight"] = model.norm;
+        model.tensors["norm.bias"] = model.norm_b;
+
         model.tensors["output_norm.weight"] = model.output_norm;
         model.tensors["output_norm.bias"] = model.output_norm_b;
         model.tensors["output.weight"] = model.output;
 
         for (int i = 0; i < n_layer; ++i) {
-            auto & layer = model.layers[i];
+            auto &layer = model.layers[i];
 
             layer.attention_norm = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
             layer.attention_norm_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
 
-            layer.query_key_value = ggml_new_tensor_2d(ctx, wtype, n_embd, 3*n_embd);
-            layer.query_key_value_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3*n_embd);
+            layer.query_key_value = ggml_new_tensor_2d(ctx, wtype, n_embd, 3 * n_embd);
+            layer.query_key_value_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 3 * n_embd);
             layer.wo = ggml_new_tensor_2d(ctx, wtype, n_embd, n_embd);
             layer.wo_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
 
             layer.ffn_norm = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
             layer.ffn_norm_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
 
-            layer.w1 = ggml_new_tensor_2d(ctx, wtype, n_embd,   n_ff);
+            layer.w1 = ggml_new_tensor_2d(ctx, wtype, n_embd, n_ff);
             layer.w1_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_ff);
-            layer.w2 = ggml_new_tensor_2d(ctx, wtype,   n_ff, n_embd);
+            layer.w2 = ggml_new_tensor_2d(ctx, wtype, n_ff, n_embd);
             layer.w2_b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
 
             // map by name
@@ -298,21 +341,21 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
     // key + value memory
     {
-        const auto & hparams = model.hparams;
+        const auto &hparams = model.hparams;
 
-        const int n_embd  = hparams.n_embd;
+        const int n_embd = hparams.n_embd;
         const int n_layer = hparams.n_layer;
-        const int n_ctx   = hparams.n_ctx;
+        const int n_ctx = hparams.n_ctx;
 
-        const int n_mem      = n_layer*n_ctx;
-        const int n_elements = n_embd*n_mem;
+        const int n_mem = n_layer * n_ctx;
+        const int n_elements = n_embd * n_mem;
 
         model.memory_k = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_elements);
         model.memory_v = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_elements);
 
         const size_t memory_size = ggml_nbytes(model.memory_k) + ggml_nbytes(model.memory_v);
 
-        printf("%s: memory_size = %8.2f MB, n_mem = %d\n", __func__, memory_size/1024.0/1024.0, n_mem);
+        printf("%s: memory_size = %8.2f MB, n_mem = %d\n", __func__, memory_size / 1024.0 / 1024.0, n_mem);
     }
 
     const size_t file_offset = fin.tellg();
@@ -330,7 +373,7 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
             fname_part += "." + std::to_string(i);
         }
 
-        printf("%s: loading model part %d/%d from '%s'\n", __func__, i+1, n_parts, fname_part.c_str());
+        printf("%s: loading model part %d/%d from '%s'\n", __func__, i + 1, n_parts, fname_part.c_str());
 
         fin = std::ifstream(fname_part, std::ios::binary);
         fin.seekg(file_offset);
@@ -349,14 +392,14 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
                 fin.read(reinterpret_cast<char *>(&n_dims), sizeof(n_dims));
                 fin.read(reinterpret_cast<char *>(&length), sizeof(length));
-                fin.read(reinterpret_cast<char *>(&ftype),  sizeof(ftype));
+                fin.read(reinterpret_cast<char *>(&ftype), sizeof(ftype));
 
                 if (fin.eof()) {
                     break;
                 }
 
                 int32_t nelements = 1;
-                int32_t ne[2] = { 1, 1 };
+                int32_t ne[2] = {1, 1};
                 for (int i = 0; i < n_dims; ++i) {
                     fin.read(reinterpret_cast<char *>(&ne[i]), sizeof(ne[i]));
                     nelements *= ne[i];
@@ -410,7 +453,7 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
                         return false;
                     }
                 } else {
-                    if (ggml_nelements(tensor)/n_parts != nelements) {
+                    if (ggml_nelements(tensor) / n_parts != nelements) {
                         fprintf(stderr, "%s: tensor '%s' has wrong size in model file\n", __func__, name.data());
                         return false;
                     }
@@ -425,14 +468,14 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
                     }
                 } else {
                     if (split_type == 0) {
-                        if (tensor->ne[0]/n_parts != ne[0] || tensor->ne[1] != ne[1]) {
+                        if (tensor->ne[0] / n_parts != ne[0] || tensor->ne[1] != ne[1]) {
                             fprintf(stderr,
                                     "%s: tensor '%s' has wrong shape in model file: got [%lld, %lld], expected [%d, %d]\n",
                                     __func__, name.data(), tensor->ne[0] / n_parts, tensor->ne[1], ne[0], ne[1]);
                             return false;
                         }
                     } else {
-                        if (tensor->ne[0] != ne[0] || tensor->ne[1]/n_parts != ne[1]) {
+                        if (tensor->ne[0] != ne[0] || tensor->ne[1] / n_parts != ne[1]) {
                             fprintf(stderr,
                                     "%s: tensor '%s' has wrong shape in model file: got [%lld, %lld], expected [%d, %d]\n",
                                     __func__, name.data(), tensor->ne[0], tensor->ne[1] / n_parts, ne[0], ne[1]);
@@ -442,28 +485,38 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
                 }
 
                 if (0) {
-                    static const char * ftype_str[] = { "f32", "f16", "q4_0", "q4_1", };
-                    printf("%24s - [%5d, %5d], type = %6s, split = %d\n", name.data(), ne[0], ne[1], ftype_str[ftype], split_type);
+                    static const char *ftype_str[] = {"f32", "f16", "q4_0", "q4_1",};
+                    printf("%24s - [%5d, %5d], type = %6s, split = %d\n", name.data(), ne[0], ne[1], ftype_str[ftype],
+                           split_type);
                 }
 
                 size_t bpe = 0;
 
                 switch (ftype) {
-                    case 0: bpe = ggml_type_size(GGML_TYPE_F32);  break;
-                    case 1: bpe = ggml_type_size(GGML_TYPE_F16);  break;
-                    case 2: bpe = ggml_type_size(GGML_TYPE_Q4_0); assert(ne[0] % 64 == 0); break;
-                    case 3: bpe = ggml_type_size(GGML_TYPE_Q4_1); assert(ne[0] % 64 == 0); break;
-                    default:
-                            {
-                                fprintf(stderr, "%s: unknown ftype %d in model file\n", __func__, ftype);
-                                return false;
-                            }
+                    case 0:
+                        bpe = ggml_type_size(GGML_TYPE_F32);
+                        break;
+                    case 1:
+                        bpe = ggml_type_size(GGML_TYPE_F16);
+                        break;
+                    case 2:
+                        bpe = ggml_type_size(GGML_TYPE_Q4_0);
+                        assert(ne[0] % 64 == 0);
+                        break;
+                    case 3:
+                        bpe = ggml_type_size(GGML_TYPE_Q4_1);
+                        assert(ne[0] % 64 == 0);
+                        break;
+                    default: {
+                        fprintf(stderr, "%s: unknown ftype %d in model file\n", __func__, ftype);
+                        return false;
+                    }
                 };
 
                 if (n_dims == 1 || n_parts == 1) {
-                    if ((nelements*bpe)/ggml_blck_size(tensor->type) != ggml_nbytes(tensor)) {
+                    if ((nelements * bpe) / ggml_blck_size(tensor->type) != ggml_nbytes(tensor)) {
                         fprintf(stderr, "%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n",
-                                __func__, name.data(), ggml_nbytes(tensor), nelements*bpe);
+                                __func__, name.data(), ggml_nbytes(tensor), nelements * bpe);
                         return false;
                     }
 
@@ -475,35 +528,38 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
                     total_size += ggml_nbytes(tensor);
                 } else {
-                    if ((nelements*bpe)/ggml_blck_size(tensor->type) != ggml_nbytes(tensor)/n_parts) {
+                    if ((nelements * bpe) / ggml_blck_size(tensor->type) != ggml_nbytes(tensor) / n_parts) {
                         fprintf(stderr, "%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n",
-                                __func__, name.data(), ggml_nbytes(tensor)/n_parts, nelements*bpe);
+                                __func__, name.data(), ggml_nbytes(tensor) / n_parts, nelements * bpe);
                         return false;
                     }
 
                     if (split_type == 0) {
                         const int np0 = ne[0];
 
-                        const size_t row_size = (tensor->ne[0]/ggml_blck_size(tensor->type))*ggml_type_size(tensor->type);
+                        const size_t row_size =
+                                (tensor->ne[0] / ggml_blck_size(tensor->type)) * ggml_type_size(tensor->type);
                         assert(row_size == tensor->nb[1]);
 
                         for (int i1 = 0; i1 < ne[1]; ++i1) {
-                            const size_t offset_row = i1*row_size;
-                            const size_t offset = offset_row + ((part_id*np0)/ggml_blck_size(tensor->type))*ggml_type_size(tensor->type);
-                            fin.read(reinterpret_cast<char *>(tensor->data) + offset, row_size/n_parts);
+                            const size_t offset_row = i1 * row_size;
+                            const size_t offset = offset_row + ((part_id * np0) / ggml_blck_size(tensor->type)) *
+                                                               ggml_type_size(tensor->type);
+                            fin.read(reinterpret_cast<char *>(tensor->data) + offset, row_size / n_parts);
                         }
                     } else {
                         const int np1 = ne[1];
 
-                        const size_t row_size = (tensor->ne[0]/ggml_blck_size(tensor->type))*ggml_type_size(tensor->type);
+                        const size_t row_size =
+                                (tensor->ne[0] / ggml_blck_size(tensor->type)) * ggml_type_size(tensor->type);
 
                         for (int i1 = 0; i1 < ne[1]; ++i1) {
-                            const size_t offset_row = (i1 + part_id*np1)*row_size;
+                            const size_t offset_row = (i1 + part_id * np1) * row_size;
                             fin.read(reinterpret_cast<char *>(tensor->data) + offset_row, row_size);
                         }
                     }
 
-                    total_size += ggml_nbytes(tensor)/n_parts;
+                    total_size += ggml_nbytes(tensor) / n_parts;
                 }
 
                 //printf("%42s - [%5d, %5d], type = %6s, %6.2f MB\n", name.data(), ne[0], ne[1], ftype == 0 ? "float" : "f16", ggml_nbytes(tensor)/1024.0/1024.0);
@@ -515,7 +571,7 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 
             printf(" done\n");
 
-            printf("%s: model size = %8.2f MB / num tensors = %d\n", __func__, total_size/1024.0/1024.0, n_tensors);
+            printf("%s: model size = %8.2f MB / num tensors = %d\n", __func__, total_size / 1024.0 / 1024.0, n_tensors);
         }
 
         fin.close();
@@ -535,30 +591,30 @@ bool bloom_model_load(const std::string & fname, bloom_model & model, gpt_vocab 
 // The GPT-J model requires about 16MB of memory per input token.
 //
 bool bloom_eval(
-        const bloom_model & model,
+        const bloom_model &model,
         const int n_threads,
         const int n_past,
-        const std::vector<gpt_vocab::id> & embd_inp,
-              std::vector<float>         & embd_w,
-              size_t                     & mem_per_token) {
+        const std::vector<gpt_vocab::id> &embd_inp,
+        std::vector<float> &embd_w,
+        size_t &mem_per_token) {
 
     const int N = embd_inp.size();
 
-    const auto & hparams = model.hparams;
+    const auto &hparams = model.hparams;
 
-    const int n_embd  = hparams.n_embd;
+    const int n_embd = hparams.n_embd;
     const int n_layer = hparams.n_layer;
-    const int n_ctx   = hparams.n_ctx;
-    const int n_head  = hparams.n_head;
+    const int n_ctx = hparams.n_ctx;
+    const int n_head = hparams.n_head;
     const int n_vocab = hparams.n_vocab;
 
-    const int d_key = n_embd/n_head;
+    const int d_key = n_embd / n_head;
 
-    static size_t buf_size = 512u*1024*1024;
-    static void * buf = malloc(buf_size);
+    static size_t buf_size = 512u * 1024 * 1024;
+    static void *buf = malloc(buf_size);
 
-    if (mem_per_token > 0 && mem_per_token*N > buf_size) {
-        const size_t buf_size_new = 1.1*(mem_per_token*N); // add 10% to account for ggml object overhead
+    if (mem_per_token > 0 && mem_per_token * N > buf_size) {
+        const size_t buf_size_new = 1.1 * (mem_per_token * N); // add 10% to account for ggml object overhead
         //printf("\n%s: reallocating buffer from %zu to %zu bytes\n", __func__, buf_size, buf_size_new);
 
         // reallocate
@@ -570,19 +626,24 @@ bool bloom_eval(
         }
     }
 
-    struct ggml_init_params params = {
-        .mem_size   = buf_size,
-        .mem_buffer = buf,
-    };
+    /*struct ggml_init_params params = {
+            .mem_size   = buf_size,
+            .mem_buffer = buf,
+    };*/
 
-    struct ggml_context * ctx0 = ggml_init(params);
+    struct ggml_init_params params;
+    params.mem_size = buf_size;
+    params.mem_buffer = buf;
+
+
+    struct ggml_context *ctx0 = ggml_init(params);
     ggml_cgraph gf = {};
     gf.n_threads = n_threads;
 
-    struct ggml_tensor * embd = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, N);
-    memcpy(embd->data, embd_inp.data(), N*ggml_element_size(embd));
+    struct ggml_tensor *embd = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, N);
+    memcpy(embd->data, embd_inp.data(), N * ggml_element_size(embd));
 
-    struct ggml_tensor * inpL = ggml_get_rows(ctx0, model.tok_embeddings, embd);
+    struct ggml_tensor *inpL = ggml_get_rows(ctx0, model.tok_embeddings, embd);
 
     // word embeddings norm
     {
@@ -592,9 +653,9 @@ bool bloom_eval(
     }
 
     for (int il = 0; il < n_layer; ++il) {
-        struct ggml_tensor * inpSA = inpL; //TODO: copy?
+        struct ggml_tensor *inpSA = inpL; //TODO: copy?
 
-        struct ggml_tensor * cur;
+        struct ggml_tensor *cur;
 
         // norm
         {
@@ -602,70 +663,77 @@ bool bloom_eval(
 
             // cur = attention_norm*cur
             cur = ggml_mul(ctx0,
-                        ggml_repeat(ctx0, model.layers[il].attention_norm, cur),
-                        cur);
+                           ggml_repeat(ctx0, model.layers[il].attention_norm, cur),
+                           cur);
             cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].attention_norm_b, cur), cur);
         }
 
         // attn
         {
-            cur = ggml_mul_mat(ctx0,model.layers[il].query_key_value, cur);
+            cur = ggml_mul_mat(ctx0, model.layers[il].query_key_value, cur);
 
             cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[il].query_key_value_b, cur),
-                    cur);
+                           ggml_repeat(ctx0, model.layers[il].query_key_value_b, cur),
+                           cur);
         }
 
         // cur = ggml_debug(ctx0, cur);
 
         // self-attention
         {
-            struct ggml_tensor * Qcur = ggml_view_2d(ctx0, cur, n_embd, N, cur->nb[1], 0*sizeof(float)*n_embd);
-            struct ggml_tensor * Kcur = ggml_view_2d(ctx0, cur, n_embd, N, cur->nb[1], 1*sizeof(float)*n_embd); //TODO: float or fp16?
-            struct ggml_tensor * Vcur = ggml_view_2d(ctx0, cur, n_embd, N, cur->nb[1], 2*sizeof(float)*n_embd);
+            struct ggml_tensor *Qcur = ggml_view_2d(ctx0, cur, n_embd, N, cur->nb[1], 0 * sizeof(float) * n_embd);
+            struct ggml_tensor *Kcur = ggml_view_2d(ctx0, cur, n_embd, N, cur->nb[1],
+                                                    1 * sizeof(float) * n_embd); //TODO: float or fp16?
+            struct ggml_tensor *Vcur = ggml_view_2d(ctx0, cur, n_embd, N, cur->nb[1], 2 * sizeof(float) * n_embd);
 
             // store key and value to memory
             if (N >= 1) {
-                struct ggml_tensor * k = ggml_view_1d(ctx0, model.memory_k, N*n_embd, (ggml_element_size(model.memory_k)*n_embd)*(il*n_ctx + n_past));
-                struct ggml_tensor * v = ggml_view_1d(ctx0, model.memory_v, N*n_embd, (ggml_element_size(model.memory_v)*n_embd)*(il*n_ctx + n_past));
+                struct ggml_tensor *k = ggml_view_1d(ctx0, model.memory_k, N * n_embd,
+                                                     (ggml_element_size(model.memory_k) * n_embd) *
+                                                     (il * n_ctx + n_past));
+                struct ggml_tensor *v = ggml_view_1d(ctx0, model.memory_v, N * n_embd,
+                                                     (ggml_element_size(model.memory_v) * n_embd) *
+                                                     (il * n_ctx + n_past));
 
                 ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Kcur, k));
                 ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Vcur, v));
             }
 
             // Q = Qcur.contiguous().view(n_embd/n_head, n_head, N).permute(0, 2, 1, 3)
-            struct ggml_tensor * Q =
-                ggml_permute(ctx0,
-                            ggml_cpy(ctx0, Qcur,
-                                ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, n_embd/n_head, n_head, N)),
-                        0, 2, 1, 3);
+            struct ggml_tensor *Q =
+                    ggml_permute(ctx0,
+                                 ggml_cpy(ctx0, Qcur,
+                                          ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, n_embd / n_head, n_head, N)),
+                                 0, 2, 1, 3);
 
             // K = Kmem.view(n_embd/n_head, n_head, n_past + N).permute(0, 2, 1, 3)
-            struct ggml_tensor * K =
-                ggml_permute(ctx0, ggml_reshape_3d(ctx0,
-                                ggml_view_1d(ctx0, model.memory_k, (n_past + N)*n_embd, il*n_ctx*ggml_element_size(model.memory_k)*n_embd),
-                                n_embd/n_head, n_head, n_past + N),
-                        0, 2, 1, 3);
+            struct ggml_tensor *K =
+                    ggml_permute(ctx0, ggml_reshape_3d(ctx0,
+                                                       ggml_view_1d(ctx0, model.memory_k, (n_past + N) * n_embd,
+                                                                    il * n_ctx * ggml_element_size(model.memory_k) *
+                                                                    n_embd),
+                                                       n_embd / n_head, n_head, n_past + N),
+                                 0, 2, 1, 3);
 
             // K * Q
-            struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
+            struct ggml_tensor *KQ = ggml_mul_mat(ctx0, K, Q);
 
             // KQ_scaled = KQ / sqrt(n_embd/n_head)
-            struct ggml_tensor * KQ_scaled =
-                ggml_scale(ctx0,
-                        KQ,
-                        ggml_new_f32(ctx0, 1.0f/sqrt(float(n_embd)/n_head))
-                        );
+            struct ggml_tensor *KQ_scaled =
+                    ggml_scale(ctx0,
+                               KQ,
+                               ggml_new_f32(ctx0, 1.0f / sqrt(float(n_embd) / n_head))
+                    );
 
             // Alibi
             // KQ_scaled_alibi = KQ_scaled + alibi_bias //TODO: optimize
-            struct ggml_tensor * KQ_scaled_alibi = ggml_alibi(ctx0, KQ_scaled, n_past, n_head);
+            struct ggml_tensor *KQ_scaled_alibi = ggml_alibi(ctx0, KQ_scaled, n_past, n_head);
 
             // KQ_masked = mask_past(KQ_scaled)
-            struct ggml_tensor * KQ_masked = ggml_diag_mask_inf(ctx0, KQ_scaled_alibi, n_past);
+            struct ggml_tensor *KQ_masked = ggml_diag_mask_inf(ctx0, KQ_scaled_alibi, n_past);
 
             // KQ = soft_max(KQ_masked)
-            struct ggml_tensor * KQ_soft_max = ggml_soft_max(ctx0, KQ_masked);
+            struct ggml_tensor *KQ_soft_max = ggml_soft_max(ctx0, KQ_masked);
 
             // V_trans = Vmem.view(n_embd/n_head, n_head, n_past + N).permute(1, 2, 0, 3).contiguous()
             struct ggml_tensor *V_trans =
@@ -679,24 +747,24 @@ bool bloom_eval(
                                           1, 2, 0, 3),
                              ggml_new_tensor_3d(ctx0, model.memory_v->type, n_past + N, n_embd / n_head, n_head));
             // KQV = transpose(V) * KQ_soft_max
-            struct ggml_tensor * KQV = ggml_mul_mat(ctx0, V_trans, KQ_soft_max);
+            struct ggml_tensor *KQV = ggml_mul_mat(ctx0, V_trans, KQ_soft_max);
 
             // KQV_merged = KQV.permute(0, 2, 1, 3)
-            struct ggml_tensor * KQV_merged = ggml_permute(ctx0, KQV, 0, 2, 1, 3);
+            struct ggml_tensor *KQV_merged = ggml_permute(ctx0, KQV, 0, 2, 1, 3);
 
             // cur = KQV_merged.contiguous().view(n_embd, N)
             cur = ggml_cpy(ctx0,
-                    KQV_merged,
-                    ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd, N));
+                           KQV_merged,
+                           ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd, N));
 
             // projection
             cur = ggml_mul_mat(ctx0,
-                    model.layers[il].wo,
-                    cur);
+                               model.layers[il].wo,
+                               cur);
             cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].wo_b, cur), cur);
         }
 
-        struct ggml_tensor * inpFF = ggml_add(ctx0, cur, inpSA);
+        struct ggml_tensor *inpFF = ggml_add(ctx0, cur, inpSA);
 
         // feed-forward network
         {
@@ -706,25 +774,25 @@ bool bloom_eval(
 
                 // cur = ffn_norm*cur + ffn_norm_b
                 cur = ggml_mul(ctx0,
-                        ggml_repeat(ctx0, model.layers[il].ffn_norm, cur),
-                        cur);
+                               ggml_repeat(ctx0, model.layers[il].ffn_norm, cur),
+                               cur);
                 cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].ffn_norm_b, cur), cur);
             }
 
             cur = ggml_mul_mat(ctx0,
-                    model.layers[il].w1,
-                    cur);
+                               model.layers[il].w1,
+                               cur);
             cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].w1_b, cur), cur);
 
             cur = ggml_gelu(ctx0, cur);
 
             cur = ggml_mul_mat(ctx0,
-                    model.layers[il].w2,
-                    cur);
+                               model.layers[il].w2,
+                               cur);
             cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].w2_b, cur), cur);
         }
 
-        cur  = ggml_add(ctx0, cur, inpFF);
+        cur = ggml_add(ctx0, cur, inpFF);
 
         // input for next layer
         inpL = cur;
@@ -736,9 +804,9 @@ bool bloom_eval(
 
         // inpL = norm*inpL
         inpL = ggml_mul(ctx0,
-                    ggml_repeat(ctx0, model.output_norm, inpL),
-                    inpL);
-        
+                        ggml_repeat(ctx0, model.output_norm, inpL),
+                        inpL);
+
         inpL = ggml_add(ctx0, ggml_repeat(ctx0, model.output_norm_b, inpL), inpL);
     }
 
@@ -752,7 +820,7 @@ bool bloom_eval(
 
     // run the computation
     ggml_build_forward_expand(&gf, inpL);
-    ggml_graph_compute       (ctx0, &gf);
+    ggml_graph_compute(ctx0, &gf);
 
     //if (n_past%100 == 0) {
     //    ggml_graph_print   (&gf);
@@ -764,10 +832,10 @@ bool bloom_eval(
 
     // return result for just the last token
     embd_w.resize(n_vocab);
-    memcpy(embd_w.data(), (float *) ggml_get_data(inpL) + (n_vocab*(N-1)), sizeof(float)*n_vocab);
+    memcpy(embd_w.data(), (float *) ggml_get_data(inpL) + (n_vocab * (N - 1)), sizeof(float) * n_vocab);
 
     if (mem_per_token == 0) {
-        mem_per_token = ggml_used_mem(ctx0)/N;
+        mem_per_token = ggml_used_mem(ctx0) / N;
     }
     //printf("used_mem = %zu\n", ggml_used_mem(ctx0));
 
@@ -776,13 +844,29 @@ bool bloom_eval(
     return true;
 }
 
-int main(int argc, char ** argv) {
+#ifdef _WIN32
+
+#include <windows.h>
+#include <locale>
+#include <codecvt>
+
+#endif
+
+int main(int argc, char **argv) {
+
+#ifdef _WIN32
+//    SetConsoleOutputCP(65001);
+#endif
+    system("chcp 65001");
+
     ggml_time_init();
     const int64_t t_main_start_us = ggml_time_us();
 
     gpt_params params;
-    params.model = "models/ggml-model-bloomz-7b1-f16-q4_0.bin";
-    params.prompt = "Je vais";
+//    params.model = "models/ggml-model-bloomz-396m-zh-f16.bin";
+    params.model = "models/ggml-model-bloom-396m-chat-f16.bin";
+    params.prompt = "面包的烘焙制作流程";
+//    params.prompt = "面包的制作流程";
 
     if (gpt_params_parse(argc, argv, params) == false) {
         return 1;
@@ -799,53 +883,103 @@ int main(int argc, char ** argv) {
         params.prompt = gpt_random_prompt(rng);
     }
 
+
 //    params.prompt = R"(// this function checks if the number n is prime
 //bool is_prime(int n) {)";
 
     int64_t t_load_us = 0;
 
     gpt_vocab vocab;
+    gpt_vocab lack_words;
     bloom_model model;
 
     // load the model
     {
         const int64_t t_start_us = ggml_time_us();
         const int n_ctx = 512;
-        if (!bloom_model_load(params.model, model, vocab, n_ctx)) {  // TODO: set context from user input ??
+        if (!bloom_model_load(params.model, model, vocab, lack_words, n_ctx)) {  // TODO: set context from user input ??
             fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, params.model.c_str());
             return 1;
         }
+//        vocab = vocab_with_lack_words;
+//        int len = vocab_with_lack_words.id_to_token.size();
+
+//        auto fout0 = std::ofstream("./lack_words.txt", std::ios::binary);
+//        char * buf0 = new char[100];
+//        for (auto it : lack_words.id_to_token){
+//            sprintf(buf0, "[%d, %d] %s\n",(uint32_t)(it.first % 65536), (uint32_t)(it.first / 65536),  it.second.c_str());
+//            fout0.write(buf0,strlen(buf0));
+//        }
+//        delete [] buf0;
+//        fout0.close();
+
+//        auto fout1 = std::ofstream("./vocab.txt", std::ios::binary);
+//        char * buf1 = new char[100];
+//        for (auto it : vocab.id_to_token){
+//            sprintf(buf1, "[%d, %d] %s\n",(uint32_t)(it.first % 65536), (uint32_t)(it.first / 65536),  it.second.c_str());
+//            fout1.write(buf1,strlen(buf1));
+//        }
+//        delete [] buf1;
+//        fout1.close();
 
         t_load_us = ggml_time_us() - t_start_us;
+
+//        auto fout = std::ofstream("./vocab.txt", std::ios::binary);
+//        for (int i = 0; i < vocab.id_to_token.size(); i++) {
+//            std::string s = vocab.id_to_token[i] + "\n";
+//            fout.write(s.c_str(),s.length());
+//
+//        }
+//        fout.close();
+//        return 1;
     }
+    gpt_vocab vocab_all;
+    vocab_all.id_to_token.insert(vocab.id_to_token.begin(), vocab.id_to_token.end());
+    vocab_all.token_to_id.insert(vocab.token_to_id.begin(), vocab.token_to_id.end());
+    vocab_all.id_to_token.insert(lack_words.id_to_token.begin(), lack_words.id_to_token.end());
+    vocab_all.token_to_id.insert(lack_words.token_to_id.begin(), lack_words.token_to_id.end());
 
     int n_past = 0;
 
-    int64_t t_sample_us  = 0;
+    int64_t t_sample_us = 0;
     int64_t t_predict_us = 0;
 
     std::vector<float> logits;
 
     // tokenize the prompt
-    std::vector<gpt_vocab::id> embd_inp = ::bloom_tokenize(vocab, params.prompt, false); //TODO: set bos to true?
+    std::vector<gpt_vocab::id> embd_inp = ::bloom_tokenize(vocab_all, params.prompt,
+                                                           false); //TODO: set bos to true?
 
-    params.n_predict = std::min(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
+//    std::vector<gpt_vocab::id> embd_inp  = {24765,373,1165,273,18263};
+
+    params.n_predict = std::min<int>(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
 
     printf("\n");
     printf("%s: prompt: '%s'\n", __func__, params.prompt.c_str());
     printf("%s: number of tokens in prompt = %zu\n", __func__, embd_inp.size());
     for (int i = 0; i < (int) embd_inp.size(); i++) {
-        printf("%6d -> '%s'\n", embd_inp[i], vocab.id_to_token.at(embd_inp[i]).c_str());
+//        printf("%6d -> '%s'\n", embd_inp[i], vocab.id_to_token.at(embd_inp[i]).c_str());
+        std::string word = vocab_all.id_to_token[embd_inp[i]];
+        if (word == "\357\277\275") {
+            uint32_t id = embd_inp[i] + embd_inp[i + 1] * 65536;
+            word = vocab_all.id_to_token[id];
+            printf("(%d, %d) -> '%s'\n", embd_inp[i], embd_inp[i + 1], word.c_str());
+            i++;
+        } else {
+            printf("(%d) -> '%s'\n", embd_inp[i], word.c_str());
+        }
+
     }
     printf("\n");
-    printf("sampling parameters: temp = %f, top_k = %d, top_p = %f, repeat_last_n = %i, repeat_penalty = %f\n", params.temp, params.top_k, params.top_p, params.repeat_last_n, params.repeat_penalty);
+    printf("sampling parameters: temp = %f, top_k = %d, top_p = %f, repeat_last_n = %i, repeat_penalty = %f\n",
+           params.temp, params.top_k, params.top_p, params.repeat_last_n, params.repeat_penalty);
     printf("\n\n");
 
     std::vector<gpt_vocab::id> embd;
 
     // determine the required inference memory per token:
     size_t mem_per_token = 0;
-    bloom_eval(model, params.n_threads, 0, { 0, 1, 2, 3 }, logits, mem_per_token);
+    bloom_eval(model, params.n_threads, 0, {0, 1, 2, 3}, logits, mem_per_token);
 
     int last_n_size = params.repeat_last_n;
     std::vector<gpt_vocab::id> last_n_tokens(last_n_size);
@@ -870,7 +1004,7 @@ int main(int argc, char ** argv) {
         if (i >= embd_inp.size()) {
             // sample next token
             const float top_p = params.top_p;
-            const float temp  = params.temp;
+            const float temp = params.temp;
             const float repeat_penalty = params.repeat_penalty;
 
             const int n_vocab = model.hparams.n_vocab;
@@ -880,7 +1014,8 @@ int main(int argc, char ** argv) {
             {
                 const int64_t t_start_sample_us = ggml_time_us();
 
-                id = bloom_sample_top_p(vocab, logits.data() + (logits.size() - n_vocab), last_n_tokens, repeat_penalty, top_p, temp, rng);
+                id = bloom_sample_top_p(vocab, logits.data() + (logits.size() - n_vocab), last_n_tokens, repeat_penalty,
+                                        top_p, temp, rng);
 
                 // // print
                 // printf("\ngenerated token: '%s' (%d)\n", vocab.id_to_token[id].c_str(), id);
@@ -907,8 +1042,21 @@ int main(int argc, char ** argv) {
         }
 
         // display text
-        for (auto id : embd) {
-            printf("%s", vocab.id_to_token[id].c_str());
+//        for (auto id: embd) {
+//            printf("%s(%d)", vocab.id_to_token[id].c_str(), id);
+//        }
+        for (int i = 0; i < embd.size(); i++) {
+            std::string word = vocab_all.id_to_token[embd[i]];
+            if (word == "\357\277\275") {
+                uint32_t id = embd[i] + embd[i + 1] * 65536;
+                word = vocab_all.id_to_token[id];
+//                printf("%s(%d, %d)", word.c_str(), embd[i], embd[i + 1]);
+                printf("%s", word.c_str());
+                i++;
+            } else {
+//                printf("%s(%d)",word.c_str(), embd[i]);
+                printf("%s", word.c_str());
+            }
         }
         fflush(stdout);
 
@@ -925,10 +1073,11 @@ int main(int argc, char ** argv) {
 
         printf("\n\n");
         printf("%s: mem per token = %8zu bytes\n", __func__, mem_per_token);
-        printf("%s:     load time = %8.2f ms\n", __func__, t_load_us/1000.0f);
-        printf("%s:   sample time = %8.2f ms\n", __func__, t_sample_us/1000.0f);
-        printf("%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us/1000.0f, t_predict_us/1000.0f/n_past);
-        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us)/1000.0f);
+        printf("%s:     load time = %8.2f ms\n", __func__, t_load_us / 1000.0f);
+        printf("%s:   sample time = %8.2f ms\n", __func__, t_sample_us / 1000.0f);
+        printf("%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us / 1000.0f,
+               t_predict_us / 1000.0f / n_past);
+        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us) / 1000.0f);
     }
 
     ggml_free(model.ctx);

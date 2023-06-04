@@ -5,13 +5,57 @@
 #include <fstream>
 #include <regex>
 
- #if defined(_MSC_VER) || defined(__MINGW32__)
- #include <malloc.h> // using malloc.h with MSC/MINGW
- #elif !defined(__FreeBSD__) && !defined(__NetBSD__)
- #include <alloca.h>
- #endif
+#if defined(_MSC_VER) || defined(__MINGW32__)
 
-bool gpt_params_parse(int argc, char ** argv, gpt_params & params) {
+#include <malloc.h> // using malloc.h with MSC/MINGW
+
+#elif !defined(__FreeBSD__) && !defined(__NetBSD__)
+#include <alloca.h>
+#endif
+
+#include <windows.h>
+
+using namespace std;
+
+string utf8_to_ascii(const char *cont) {
+    if (NULL == cont) {
+        return string("");
+    }
+    int num = MultiByteToWideChar(CP_UTF8, 0, cont, -1, NULL, 0);
+    wchar_t *buffw = new wchar_t[(unsigned int) num];
+    MultiByteToWideChar(CP_UTF8, 0, cont, -1, buffw, num);
+    int len = WideCharToMultiByte(CP_ACP, 0, buffw, num - 1, NULL, 0, NULL, NULL);
+    char *lpsz = new char[(unsigned int) len + 1];
+    WideCharToMultiByte(CP_ACP, 0, buffw, num - 1, lpsz, len, NULL, NULL);
+    lpsz[len] = '\0';
+    delete[] buffw;
+    string rtn(lpsz);
+    delete[] lpsz;
+    return rtn;
+}
+
+string ascii_to_utf8(const char *cont) {
+    if (NULL == cont) {
+        return string("");
+    }
+    printf("GetACP()=%d", GetACP());
+
+    int num = MultiByteToWideChar(CP_ACP, 0, cont, -1, NULL, 0);
+    wchar_t *buffw = new wchar_t[(unsigned int) num];
+    MultiByteToWideChar(CP_ACP, 0, cont, -1, buffw, num);
+
+    int len = WideCharToMultiByte(CP_UTF8, 0, buffw, num - 1, NULL, 0, NULL, NULL);
+    char *lpsz = new char[(unsigned int) len + 1];
+    WideCharToMultiByte(CP_UTF8, 0, buffw, num - 1, lpsz, len, NULL, NULL);
+    lpsz[len] = '\0';
+    delete[] buffw;
+
+    string rtn(lpsz);
+    delete[] lpsz;
+    return rtn;
+}
+
+bool gpt_params_parse(int argc, char **argv, gpt_params &params) {
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
@@ -19,8 +63,10 @@ bool gpt_params_parse(int argc, char ** argv, gpt_params & params) {
             params.seed = std::stoi(argv[++i]);
         } else if (arg == "-t" || arg == "--threads") {
             params.n_threads = std::stoi(argv[++i]);
+        } else if (arg == "-d" || arg == "--debug") {
+            params.prompt = (argv[++i]); // 输入为utf-8字符串，不用转码
         } else if (arg == "-p" || arg == "--prompt") {
-            params.prompt = argv[++i];
+            params.prompt = ascii_to_utf8(argv[++i]); // 输入为ascii码，需要转码
         } else if (arg == "-n" || arg == "--n_predict") {
             params.n_predict = std::stoi(argv[++i]);
         } else if (arg == "--top_k") {
@@ -50,20 +96,23 @@ bool gpt_params_parse(int argc, char ** argv, gpt_params & params) {
     return true;
 }
 
-void gpt_print_usage(int argc, char ** argv, const gpt_params & params) {
+void gpt_print_usage(int argc, char **argv, const gpt_params &params) {
     fprintf(stderr, "usage: %s [options]\n", argv[0]);
     fprintf(stderr, "\n");
     fprintf(stderr, "options:\n");
     fprintf(stderr, "  -h, --help            show this help message and exit\n");
     fprintf(stderr, "  -s SEED, --seed SEED  RNG seed (default: -1)\n");
-    fprintf(stderr, "  -t N, --threads N     number of threads to use during computation (default: %d)\n", params.n_threads);
+    fprintf(stderr, "  -t N, --threads N     number of threads to use during computation (default: %d)\n",
+            params.n_threads);
     fprintf(stderr, "  -p PROMPT, --prompt PROMPT\n");
     fprintf(stderr, "                        prompt to start generation with (default: random)\n");
     fprintf(stderr, "  -n N, --n_predict N   number of tokens to predict (default: %d)\n", params.n_predict);
     fprintf(stderr, "  --top_k N             top-k sampling (default: %d)\n", params.top_k);
     fprintf(stderr, "  --top_p N             top-p sampling (default: %.1f)\n", params.top_p);
-    fprintf(stderr, "  --repeat_last_n N     last n tokens to consider for penalize (default: %d)\n", params.repeat_last_n);
-    fprintf(stderr, "  --repeat_penalty N    penalize repeat sequence of tokens (default: %.1f)\n", params.repeat_penalty);
+    fprintf(stderr, "  --repeat_last_n N     last n tokens to consider for penalize (default: %d)\n",
+            params.repeat_last_n);
+    fprintf(stderr, "  --repeat_penalty N    penalize repeat sequence of tokens (default: %.1f)\n",
+            params.repeat_penalty);
     fprintf(stderr, "  --temp N              temperature (default: %.1f)\n", params.temp);
     fprintf(stderr, "  -b N, --batch_size N  batch size for prompt processing (default: %d)\n", params.n_batch);
     fprintf(stderr, "  -m FNAME, --model FNAME\n");
@@ -71,26 +120,37 @@ void gpt_print_usage(int argc, char ** argv, const gpt_params & params) {
     fprintf(stderr, "\n");
 }
 
-std::string gpt_random_prompt(std::mt19937 & rng) {
+std::string gpt_random_prompt(std::mt19937 &rng) {
     const int r = rng() % 10;
     switch (r) {
-        case 0: return "So";
-        case 1: return "Once upon a time";
-        case 2: return "When";
-        case 3: return "The";
-        case 4: return "After";
-        case 5: return "If";
-        case 6: return "import";
-        case 7: return "He";
-        case 8: return "She";
-        case 9: return "They";
-        default: return "To";
+        case 0:
+            return "So";
+        case 1:
+            return "Once upon a time";
+        case 2:
+            return "When";
+        case 3:
+            return "The";
+        case 4:
+            return "After";
+        case 5:
+            return "If";
+        case 6:
+            return "import";
+        case 7:
+            return "He";
+        case 8:
+            return "She";
+        case 9:
+            return "They";
+        default:
+            return "To";
     }
 
     return "The";
 }
 
-void replace(std::string & str, const std::string & needle, const std::string & replacement) {
+void replace(std::string &str, const std::string &needle, const std::string &replacement) {
     size_t pos = 0;
     while ((pos = str.find(needle, pos)) != std::string::npos) {
         str.replace(pos, needle.length(), replacement);
@@ -98,8 +158,8 @@ void replace(std::string & str, const std::string & needle, const std::string & 
     }
 }
 
-std::map<std::string, int32_t> json_parse(const std::string & fname) {
-    std::map<std::string, int32_t> result;
+std::map<std::string, uint32_t> json_parse(const std::string &fname) {
+    std::map<std::string, uint32_t> result;
 
     // read file into string
     std::string json;
@@ -111,7 +171,7 @@ std::map<std::string, int32_t> json_parse(const std::string & fname) {
         }
 
         json = std::string((std::istreambuf_iterator<char>(ifs)),
-                (std::istreambuf_iterator<char>()));
+                           (std::istreambuf_iterator<char>()));
     }
 
     if (json[0] != '{') {
@@ -120,7 +180,7 @@ std::map<std::string, int32_t> json_parse(const std::string & fname) {
 
     // parse json
     {
-        bool has_key  = false;
+        bool has_key = false;
         bool in_token = false;
 
         std::string str_key = "";
@@ -135,7 +195,7 @@ std::map<std::string, int32_t> json_parse(const std::string & fname) {
                     continue;
                 }
             } else {
-                if (json[i] == '\\' && i+1 < n) {
+                if (json[i] == '\\' && i + 1 < n) {
                     if (has_key == false) {
                         str_key += json[i];
                     } else {
@@ -162,9 +222,9 @@ std::map<std::string, int32_t> json_parse(const std::string & fname) {
                         has_key = false;
                     }
 
-                    ::replace(str_key, "\\u0120", " " ); // \u0120 -> space
+                    ::replace(str_key, "\\u0120", " "); // \u0120 -> space
                     ::replace(str_key, "\\u010a", "\n"); // \u010a -> new line
-                    ::replace(str_key, "\\\"",    "\""); // \\\"   -> "
+                    ::replace(str_key, "\\\"", "\""); // \\\"   -> "
 
                     try {
                         result[str_key] = std::stoi(str_val);
@@ -189,7 +249,7 @@ std::map<std::string, int32_t> json_parse(const std::string & fname) {
     return result;
 }
 
-std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::string & text) {
+std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab &vocab, const std::string &text) {
     std::vector<std::string> words;
 
     // first split the text into words
@@ -201,7 +261,7 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
         std::smatch m;
 
         while (std::regex_search(str, m, re)) {
-            for (auto x : m) {
+            for (auto x: m) {
                 words.push_back(x);
             }
             str = m.suffix();
@@ -210,7 +270,7 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
 
     // find the longest tokens that form the words:
     std::vector<gpt_vocab::id> tokens;
-    for (const auto & word : words) {
+    for (const auto &word: words) {
         if (word.size() == 0) continue;
 
         int i = 0;
@@ -218,7 +278,7 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
         while (i < n) {
             int j = n;
             while (j > i) {
-                auto it = vocab.token_to_id.find(word.substr(i, j-i));
+                auto it = vocab.token_to_id.find(word.substr(i, j - i));
                 if (it != vocab.token_to_id.end()) {
                     tokens.push_back(it->second);
                     i = j;
@@ -244,7 +304,7 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
     return tokens;
 }
 
-std::vector<gpt_vocab::id> bloom_tokenize(const gpt_vocab & vocab, const std::string & text, bool bos) {
+std::vector<gpt_vocab::id> bloom_tokenize(const gpt_vocab &vocab, const std::string &text, bool bos) {
     //auto res = gpt_tokenize(vocab, text);
 
     //if (bos) {
@@ -257,12 +317,12 @@ std::vector<gpt_vocab::id> bloom_tokenize(const gpt_vocab & vocab, const std::st
         res.push_back(1); // TODO: replace with vocab.bos
     }
 
-     //find the longest token that matches the text
+    //find the longest token that matches the text
     int pos = 0;
     while (true) {
         int l = 0;
-        int t = 0;
-        for (const auto & kv : vocab.id_to_token) {
+        uint32_t t = 0;
+        for (const auto &kv: vocab.id_to_token) {
             if (kv.second.size() < l) continue;
             if (kv.second.size() > text.size() - pos) continue;
             if (text.substr(pos, kv.second.size()) == kv.second) {
@@ -275,19 +335,26 @@ std::vector<gpt_vocab::id> bloom_tokenize(const gpt_vocab & vocab, const std::st
             break;
         }
 
-        res.push_back(t);
+        if (t / 65536 != 0) {
+            res.push_back((uint32_t)(t % 65536));
+            res.push_back((uint32_t)(t / 65536));
+        }
+        else{
+            res.push_back(t);
+        }
+
         pos += l;
     }
 
     return res;
 }
 
-bool gpt_vocab_init(const std::string & fname, gpt_vocab & vocab) {
+bool gpt_vocab_init(const std::string &fname, gpt_vocab &vocab) {
     printf("%s: loading vocab from '%s'\n", __func__, fname.c_str());
 
     vocab.token_to_id = ::json_parse(fname);
 
-    for (const auto & kv : vocab.token_to_id) {
+    for (const auto &kv: vocab.token_to_id) {
         vocab.id_to_token[kv.second] = kv.first;
     }
 
@@ -302,21 +369,21 @@ bool gpt_vocab_init(const std::string & fname, gpt_vocab & vocab) {
 }
 
 gpt_vocab::id gpt_sample_top_k_top_p(
-        const gpt_vocab & vocab,
-        const float * logits,
-        int    top_k,
+        const gpt_vocab &vocab,
+        const float *logits,
+        int top_k,
         double top_p,
         double temp,
-        std::mt19937 & rng) {
+        std::mt19937 &rng) {
     int n_logits = vocab.id_to_token.size();
 
     std::vector<std::pair<double, gpt_vocab::id>> logits_id;
     logits_id.reserve(n_logits);
 
     {
-        const double scale = 1.0/temp;
+        const double scale = 1.0 / temp;
         for (int i = 0; i < n_logits; ++i) {
-            logits_id.push_back(std::make_pair(logits[i]*scale, i));
+            logits_id.push_back(std::make_pair(logits[i] * scale, i));
         }
     }
 
@@ -324,15 +391,15 @@ gpt_vocab::id gpt_sample_top_k_top_p(
     std::partial_sort(
             logits_id.begin(),
             logits_id.begin() + top_k, logits_id.end(),
-            [](const std::pair<double, gpt_vocab::id> & a, const std::pair<double, gpt_vocab::id> & b) {
-        return a.first > b.first;
-    });
+            [](const std::pair<double, gpt_vocab::id> &a, const std::pair<double, gpt_vocab::id> &b) {
+                return a.first > b.first;
+            });
 
     logits_id.resize(top_k);
 
     double maxl = -INFINITY;
-    for (const auto & kv : logits_id) {
-        maxl = std::max(maxl, kv.first);
+    for (const auto &kv: logits_id) {
+        maxl = std::max<double>(maxl, kv.first);
     }
 
     // compute probs for the top K tokens
@@ -340,14 +407,14 @@ gpt_vocab::id gpt_sample_top_k_top_p(
     probs.reserve(logits_id.size());
 
     double sum = 0.0;
-    for (const auto & kv : logits_id) {
+    for (const auto &kv: logits_id) {
         double p = exp(kv.first - maxl);
         probs.push_back(p);
         sum += p;
     }
 
     // normalize the probs
-    for (auto & p : probs) {
+    for (auto &p: probs) {
         p /= sum;
     }
 
@@ -363,7 +430,7 @@ gpt_vocab::id gpt_sample_top_k_top_p(
             }
         }
 
-        cumsum = 1.0/cumsum;
+        cumsum = 1.0 / cumsum;
         for (int i = 0; i < (int) probs.size(); i++) {
             probs[i] *= cumsum;
         }
@@ -382,13 +449,13 @@ gpt_vocab::id gpt_sample_top_k_top_p(
 }
 
 gpt_vocab::id bloom_sample_top_p(
-        const gpt_vocab & vocab,
-        const float * logits,
-        std::vector<gpt_vocab::id> & last_n_tokens,
+        const gpt_vocab &vocab,
+        const float *logits,
+        std::vector<gpt_vocab::id> &last_n_tokens,
         double repeat_penalty,
         double top_p,
         double temp,
-        std::mt19937 & rng) {
+        std::mt19937 &rng) {
     int n_logits = vocab.id_to_token.size();
 
     std::vector<std::pair<double, gpt_vocab::id>> logits_id;
@@ -410,19 +477,19 @@ gpt_vocab::id bloom_sample_top_p(
     // }
 
     {
-        const double scale = 1.0/temp;
+        const double scale = 1.0 / temp;
         for (int i = 0; i < n_logits; ++i) {
             // repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
             // credit https://github.com/facebookresearch/bloom/compare/main...shawwn:bloom:main
             if (std::find(last_n_tokens.begin(), last_n_tokens.end(), i) != last_n_tokens.end()) {
                 // if score < 0 then repetition penalty has to multiplied to reduce the previous token probability
                 if (logits[i] < 0.0) {
-                    logits_id.push_back(std::make_pair(logits[i]*scale*repeat_penalty, i));
+                    logits_id.push_back(std::make_pair(logits[i] * scale * repeat_penalty, i));
                 } else {
-                    logits_id.push_back(std::make_pair(logits[i]*scale/repeat_penalty, i));
-                }                
+                    logits_id.push_back(std::make_pair(logits[i] * scale / repeat_penalty, i));
+                }
             } else {
-                logits_id.push_back(std::make_pair(logits[i]*scale, i));
+                logits_id.push_back(std::make_pair(logits[i] * scale, i));
             }
         }
     }
@@ -430,13 +497,13 @@ gpt_vocab::id bloom_sample_top_p(
     std::sort(
             logits_id.begin(),
             logits_id.end(),
-            [](const std::pair<double, gpt_vocab::id> & a, const std::pair<double, gpt_vocab::id> & b) {
-        return a.first > b.first;
-    });
+            [](const std::pair<double, gpt_vocab::id> &a, const std::pair<double, gpt_vocab::id> &b) {
+                return a.first > b.first;
+            });
 
     double maxl = -INFINITY;
-    for (const auto & kv : logits_id) {
-        maxl = std::max(maxl, kv.first);
+    for (const auto &kv: logits_id) {
+        maxl = std::max<double>(maxl, kv.first);
     }
 
     // compute probs for the top K tokens
@@ -444,14 +511,14 @@ gpt_vocab::id bloom_sample_top_p(
     probs.reserve(logits_id.size());
 
     double sum = 0.0;
-    for (const auto & kv : logits_id) {
+    for (const auto &kv: logits_id) {
         double p = exp(kv.first - maxl);
         probs.push_back(p);
         sum += p;
     }
 
     // normalize the probs
-    for (auto & p : probs) {
+    for (auto &p: probs) {
         p /= sum;
     }
 
@@ -466,7 +533,7 @@ gpt_vocab::id bloom_sample_top_p(
             }
         }
 
-        cumsum = 1.0/cumsum;
+        cumsum = 1.0 / cumsum;
         for (int i = 0; i < (int) probs.size(); i++) {
             probs[i] *= cumsum;
         }
@@ -486,40 +553,40 @@ gpt_vocab::id bloom_sample_top_p(
 }
 
 
-size_t ggml_quantize_q4_0(float * src, void * dst, int n, int k, int qk, int64_t * hist) {
+size_t ggml_quantize_q4_0(float *src, void *dst, int n, int k, int qk, int64_t *hist) {
     const int nb = k / qk;
-    const size_t bs = (sizeof(float) + sizeof(uint8_t)*qk/2);
-    const size_t row_size = nb*bs;
+    const size_t bs = (sizeof(float) + sizeof(uint8_t) * qk / 2);
+    const size_t row_size = nb * bs;
 
     assert(k % qk == 0);
 
     const size_t pp_size = qk / 2;
-    uint8_t *pp = static_cast<uint8_t*>(alloca(pp_size));
+    uint8_t *pp = static_cast<uint8_t *>(alloca(pp_size));
 
-    char * pdst = (char *) dst;
+    char *pdst = (char *) dst;
 
     for (int j = 0; j < n; j += k) {
-        uint8_t * pd = (uint8_t *) (pdst + (j/k)*row_size + 0*bs);
-        uint8_t * pb = (uint8_t *) (pdst + (j/k)*row_size + 0*bs + sizeof(float));
+        uint8_t *pd = (uint8_t *) (pdst + (j / k) * row_size + 0 * bs);
+        uint8_t *pb = (uint8_t *) (pdst + (j / k) * row_size + 0 * bs + sizeof(float));
 
         for (int i = 0; i < nb; i++) {
             float amax = 0.0f; // absolute max
 
             {
                 for (int l = 0; l < qk; l++) {
-                    const float v = src[j + i*qk + l];
-                    amax = std::max(amax, fabsf(v));
+                    const float v = src[j + i * qk + l];
+                    amax = std::max<int>(amax, fabsf(v));
                 }
 
                 const float d = amax / ((1 << 3) - 1);
-                const float id = d ? 1.0f/d : 0.0f;
+                const float id = d ? 1.0f / d : 0.0f;
 
                 *(float *) pd = d;
                 pd += bs;
 
                 for (int l = 0; l < qk; l += 2) {
-                    const float v0 = (src[j + i*qk + l + 0])*id;
-                    const float v1 = (src[j + i*qk + l + 1])*id;
+                    const float v0 = (src[j + i * qk + l + 0]) * id;
+                    const float v1 = (src[j + i * qk + l + 1]) * id;
 
                     const uint8_t vi0 = ((int8_t) (round(v0))) + 8;
                     const uint8_t vi1 = ((int8_t) (round(v1))) + 8;
@@ -530,7 +597,7 @@ size_t ggml_quantize_q4_0(float * src, void * dst, int n, int k, int qk, int64_t
                     hist[vi0]++;
                     hist[vi1]++;
 
-                    pp[l/2] = vi0 | (vi1 << 4);
+                    pp[l / 2] = vi0 | (vi1 << 4);
                 }
 
                 memcpy(pb, pp, pp_size);
@@ -539,47 +606,51 @@ size_t ggml_quantize_q4_0(float * src, void * dst, int n, int k, int qk, int64_t
         }
     }
 
-    return (n/k)*row_size;
+    return (n / k) * row_size;
 }
 
-size_t ggml_quantize_q4_1(float * src, void * dst, int n, int k, int qk, int64_t * hist) {
+size_t ggml_quantize_q4_1(float *src, void *dst, int n, int k, int qk, int64_t *hist) {
     const int nb = k / qk;
-    const size_t row_size = nb*(2*sizeof(float) + sizeof(uint8_t)*qk/2);
+    const size_t row_size = nb * (2 * sizeof(float) + sizeof(uint8_t) * qk / 2);
 
     assert(k % qk == 0);
 
     const size_t pp_size = qk / 2;
-    uint8_t *pp = static_cast<uint8_t*>(alloca(pp_size));
+    uint8_t *pp = static_cast<uint8_t *>(alloca(pp_size));
 
-    char * pdst = (char *) dst;
+    char *pdst = (char *) dst;
 
     for (int j = 0; j < n; j += k) {
-        float   * pm = (float *)   (pdst + (j/k)*row_size);
-        float   * pd = (float *)   (pm + nb);
-        uint8_t * pb = (uint8_t *) (pd + nb);
+        float *pm = (float *) (pdst + (j / k) * row_size);
+        float *pd = (float *) (pm + nb);
+        uint8_t *pb = (uint8_t *) (pd + nb);
 
         //printf("n = %d, k = %d, nb = %d, row_size = %d, j = %d, pm = %p, pd = %p, pb = %p\n", n, k, nb, row_size, j, pm, pd, pb);
 
         for (int i = 0; i < nb; i++) {
+#ifdef MSVC
+            float min = FLT_MIN;// std::numeric_limits<float>::max();
+            float max = FLT_MAX;// std::numeric_limits<float>::min();
+#else
             float min = std::numeric_limits<float>::max();
             float max = std::numeric_limits<float>::min();
-
+#endif
             {
                 for (int l = 0; l < qk; l++) {
-                    const float v = src[j + i*qk + l];
+                    const float v = src[j + i * qk + l];
                     if (v < min) min = v;
                     if (v > max) max = v;
                 }
 
                 const float d = (max - min) / ((1 << 4) - 1);
-                const float id = d ? 1.0f/d : 0.0f;
+                const float id = d ? 1.0f / d : 0.0f;
 
                 pm[i] = min;
                 pd[i] = d;
 
                 for (int l = 0; l < qk; l += 2) {
-                    const float v0 = (src[j + i*qk + l + 0] - min)*id;
-                    const float v1 = (src[j + i*qk + l + 1] - min)*id;
+                    const float v0 = (src[j + i * qk + l + 0] - min) * id;
+                    const float v1 = (src[j + i * qk + l + 1] - min) * id;
 
                     const uint8_t vi0 = round(v0);
                     const uint8_t vi1 = round(v1);
@@ -590,13 +661,13 @@ size_t ggml_quantize_q4_1(float * src, void * dst, int n, int k, int qk, int64_t
                     hist[vi0]++;
                     hist[vi1]++;
 
-                    pp[l/2] = vi0 | (vi1 << 4);
+                    pp[l / 2] = vi0 | (vi1 << 4);
                 }
 
-                memcpy(pb + i*qk/2, pp, pp_size);
+                memcpy(pb + i * qk / 2, pp, pp_size);
             }
         }
     }
 
-    return (n/k)*row_size;
+    return (n / k) * row_size;
 }

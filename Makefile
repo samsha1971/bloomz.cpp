@@ -30,8 +30,10 @@ endif
 # Compile flags
 #
 
-CFLAGS   = -I.              -O3 -DNDEBUG -std=c11   -fPIC
-CXXFLAGS = -I. -I./examples -O3 -DNDEBUG -std=c++11 -fPIC
+#CFLAGS   = -I.              -O3 -DNDEBUG -std=c11   -fPIC -g
+#CXXFLAGS = -I. -I./examples -O3 -DNDEBUG -std=c++11 -fPIC -g
+CFLAGS   = -I.              -O0 -DNDEBUG -std=c11   -fPIC -g
+CXXFLAGS = -I. -I./examples -O0 -DNDEBUG -std=c++11 -fPIC -g
 LDFLAGS  =
 
 # OS specific
@@ -56,6 +58,12 @@ ifeq ($(UNAME_S),Haiku)
 	CXXFLAGS += -pthread
 endif
 ifeq ($(findstring MINGW, $(UNAME_S)),MINGW)
+	CFLAGS   += -pthread
+	CXXFLAGS += -pthread
+	LDFLAGS  += -static
+endif
+
+ifeq ($(findstring MSYS_NT, $(UNAME_S)),MSYS_NT)
 	CFLAGS   += -pthread
 	CXXFLAGS += -pthread
 	LDFLAGS  += -static
@@ -201,6 +209,8 @@ main: main.cpp ggml.o utils.o
 
 quantize: quantize.cpp ggml.o utils.o
 	$(CXX) $(CXXFLAGS) quantize.cpp ggml.o utils.o -o quantize $(LDFLAGS)
+
+all: main quantize
 
 #
 # Tests
