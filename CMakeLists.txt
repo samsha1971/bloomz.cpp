@@ -5,8 +5,21 @@ include(CTest)
 enable_testing()
 
 add_executable(main main.cpp ggml.c utils.cpp)
-
 add_executable(quantize quantize.cpp ggml.c utils.cpp)
+
+if(CMAKE_HOST_SYSTEM_NAME MATCHES "Linux")
+    set (ICONV_HOME /usr/local/mingw64)
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${ICONV_HOME}/include)
+    target_link_libraries(main ${ICONV_HOME}/lib/libiconv.a)
+    target_link_libraries(quantize ${ICONV_HOME}/lib/libiconv.a)
+elseif(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")
+    set (ICONV_HOME C:/msys64/usr/local/mingw64)
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${ICONV_HOME}/include)
+    target_link_libraries(main ${ICONV_HOME}/lib/libiconv.a)
+    target_link_libraries(quantize ${ICONV_HOME}/lib/libiconv.a)
+else()
+    message("current platform: unkonw ")
+endif()
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
