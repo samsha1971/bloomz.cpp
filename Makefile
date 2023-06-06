@@ -29,12 +29,22 @@ endif
 #
 # Compile flags
 #
+ICONV_HOME := /usr/local/mingw64
+ifeq ($(findstring MINGW, $(UNAME_S)),MINGW)
+	ICONV_HOME := C:/msys64/usr/local/mingw64
+endif
+
+
+ifeq ($(findstring MSYS_NT, $(UNAME_S)),MSYS_NT)
+	ICONV_HOME := C:/msys64/usr/local/mingw64
+endif
 
 #CFLAGS   = -I.              -O3 -DNDEBUG -std=c11   -fPIC -g
 #CXXFLAGS = -I. -I./examples -O3 -DNDEBUG -std=c++11 -fPIC -g
 CFLAGS   = -I.              -O0 -DNDEBUG -std=c11   -fPIC -g
-CXXFLAGS = -I. -I./examples -O0 -DNDEBUG -std=c++11 -fPIC -g
-LDFLAGS  =
+CXXFLAGS = -I. -I./examples -I"${ICONV_HOME}/include" -O0 -DNDEBUG -std=c++11 -fPIC -g
+LDFLAGS  = -L"${ICONV_HOME}/lib" -liconv
+
 
 # OS specific
 ifeq ($(UNAME_S),Linux)

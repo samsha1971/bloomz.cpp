@@ -11,63 +11,94 @@
 #include <alloca.h>
 #endif
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
-#include <windows.h>
-using namespace std;
-string utf8_to_ascii(const char *cont) {
-    if (NULL == cont) {
-        return string("");
-    }
-    int num = MultiByteToWideChar(CP_UTF8, 0, cont, -1, NULL, 0);
-    wchar_t *buffw = new wchar_t[(unsigned int) num];
-    MultiByteToWideChar(CP_UTF8, 0, cont, -1, buffw, num);
-    int len = WideCharToMultiByte(CP_ACP, 0, buffw, num - 1, NULL, 0, NULL, NULL);
-    char *lpsz = new char[(unsigned int) len + 1];
-    WideCharToMultiByte(CP_ACP, 0, buffw, num - 1, lpsz, len, NULL, NULL);
-    lpsz[len] = '\0';
-    delete[] buffw;
-    string rtn(lpsz);
-    delete[] lpsz;
-    return rtn;
-}
-string ascii_to_utf8(const char *cont) {
-    if (NULL == cont) {
-        return string("");
-    }
-    printf("GetACP()=%d", GetACP());
-
-    int num = MultiByteToWideChar(CP_ACP, 0, cont, -1, NULL, 0);
-    wchar_t *buffw = new wchar_t[(unsigned int) num];
-    MultiByteToWideChar(CP_ACP, 0, cont, -1, buffw, num);
-
-    int len = WideCharToMultiByte(CP_UTF8, 0, buffw, num - 1, NULL, 0, NULL, NULL);
-    char *lpsz = new char[(unsigned int) len + 1];
-    WideCharToMultiByte(CP_UTF8, 0, buffw, num - 1, lpsz, len, NULL, NULL);
-    lpsz[len] = '\0';
-    delete[] buffw;
-
-    string rtn(lpsz);
-    delete[] lpsz;
-    return rtn;
-}
-#else
-# 以下未经过测试
+#include <iconv.h>
 #include <iostream>
-#include <string>
-#include <locale>
-#include <codecvt>
-// 将 ASCII 字符串转换为 UTF-8 字符串
-std::string ascii_to_utf8(const std::string& ascii) {
-    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-    std::u16string u16str = converter.from_bytes(ascii);
-    return converter.to_bytes(u16str);
+#include <cstring>
+#include <malloc.h>
+#include <fstream>
+
+std::string iconv_convert(const char *from_charset, const char *to_charset, std::string in) {
+    iconv_t cd;
+    cd = iconv_open(to_charset, from_charset);
+    if (cd == 0)
+        return nullptr;
+    char *in_buf = const_cast<char *>(in.c_str());
+    size_t in_len = strlen(in_buf);
+    size_t out_len = in_len * 5;
+    char *out_buf = static_cast<char *>(malloc(out_len));
+    memset(out_buf, 0, out_len);
+    char *pin = in_buf;
+    char *pout = out_buf;
+
+    if ((int) iconv(cd, &pin, &in_len, &pout, &out_len) == -1) {
+        iconv_close(cd);
+        free(out_buf);
+        return nullptr;
+    }
+    std::string out;
+    out.append(out_buf);
+    iconv_close(cd);
+    free(out_buf);
+    return out;
 }
-// 将 UTF-8 字符串转换为 ASCII 字符串
-std::string utf8_to_ascii(const std::string& utf8) {
-    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-    std::u16string u16str = converter.from_bytes(utf8);
-    return converter.to_bytes(u16str);
-}
+
+#if defined(_MSC_VER) || defined(__MINGW32__)
+//#include <windows.h>
+//using namespace std;
+//string utf8_to_ascii(const char *cont) {
+//    if (NULL == cont) {
+//        return string("");
+//    }
+//    int num = MultiByteToWideChar(CP_UTF8, 0, cont, -1, NULL, 0);
+//    wchar_t *buffw = new wchar_t[(unsigned int) num];
+//    MultiByteToWideChar(CP_UTF8, 0, cont, -1, buffw, num);
+//    int len = WideCharToMultiByte(CP_ACP, 0, buffw, num - 1, NULL, 0, NULL, NULL);
+//    char *lpsz = new char[(unsigned int) len + 1];
+//    WideCharToMultiByte(CP_ACP, 0, buffw, num - 1, lpsz, len, NULL, NULL);
+//    lpsz[len] = '\0';
+//    delete[] buffw;
+//    string rtn(lpsz);
+//    delete[] lpsz;
+//    return rtn;
+//}
+//string ascii_to_utf8(const char *cont) {
+//    if (NULL == cont) {
+//        return string("");
+//    }
+//    printf("GetACP()=%d", GetACP());
+//
+//    int num = MultiByteToWideChar(CP_ACP, 0, cont, -1, NULL, 0);
+//    wchar_t *buffw = new wchar_t[(unsigned int) num];
+//    MultiByteToWideChar(CP_ACP, 0, cont, -1, buffw, num);
+//
+//    int len = WideCharToMultiByte(CP_UTF8, 0, buffw, num - 1, NULL, 0, NULL, NULL);
+//    char *lpsz = new char[(unsigned int) len + 1];
+//    WideCharToMultiByte(CP_UTF8, 0, buffw, num - 1, lpsz, len, NULL, NULL);
+//    lpsz[len] = '\0';
+//    delete[] buffw;
+//
+//    string rtn(lpsz);
+//    delete[] lpsz;
+//    return rtn;
+//}
+#else
+//# 以下未经过测试
+//#include <iostream>
+//#include <string>
+//#include <locale>
+//#include <codecvt>
+//// 将 ASCII 字符串转换为 UTF-8 字符串
+//std::string ascii_to_utf8(const std::string& ascii) {
+//    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
+//    std::u16string u16str = converter.from_bytes(ascii);
+//    return converter.to_bytes(u16str);
+//}
+//// 将 UTF-8 字符串转换为 ASCII 字符串
+//std::string utf8_to_ascii(const std::string& utf8) {
+//    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
+//    std::u16string u16str = converter.from_bytes(utf8);
+//    return converter.to_bytes(u16str);
+//}
 #endif
 
 bool gpt_params_parse(int argc, char **argv, gpt_params &params) {
@@ -78,11 +109,12 @@ bool gpt_params_parse(int argc, char **argv, gpt_params &params) {
             params.seed = std::stoi(argv[++i]);
         } else if (arg == "-t" || arg == "--threads") {
             params.n_threads = std::stoi(argv[++i]);
-        } else if (arg == "-d" || arg == "--debug") {
-            params.prompt = (argv[++i]); // 输入为utf-8字符串，不用转码
         } else if (arg == "-p" || arg == "--prompt") {
+            params.prompt = (argv[++i]); // 输入为utf-8字符串，不用转码
+        } else if (arg == "-g" || arg == "--gbk") {
 #if defined(_MSC_VER) || defined(__MINGW32__)
-            params.prompt = ascii_to_utf8(argv[++i]); // 输入为ascii码，需要转码
+//            params.prompt = ascii_to_utf8(argv[++i]); // 输入为ascii码，需要转码
+            params.prompt = iconv_convert("gbk","utf-8",argv[++i]); // 输入为ascii码，需要转码
 #else
             params.prompt = (argv[++i]);
 #endif

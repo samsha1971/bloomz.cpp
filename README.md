@@ -11,11 +11,11 @@ $ python convert-bloom-to-ggml.py WangZeJun/bloom-396m-chat ./models
 ## Run inference
 
 ```shell
-$ main.exe -p "面包的烘焙过程"
-$ main.exe -p "擀面杖是干什么的"
+$ main.exe -g "面包的烘焙过程"
+$ main.exe -g "擀面杖是干什么的"
 ```
 
-Currently, only windows is supported,  because of the ascii and utf-8 conversions.
+Currently,  use [libiconv](https://www.gnu.org/software/libiconv/) to convert gbk to utf-8.
 
 ------
 
