@@ -11,11 +11,17 @@ $ python convert-bloom-to-ggml.py WangZeJun/bloom-396m-chat ./models
 ## Run inference
 
 ```shell
-$ main.exe -g "面包的烘焙过程"
-$ main.exe -g "擀面杖是干什么的"
+# one question
+$ main.exe -p "面包的烘焙过程"
+$ main.exe -p "擀面杖是干什么的"
+
+# chat model
+$ main.exe
 ```
 
-Currently,  use [libiconv](https://www.gnu.org/software/libiconv/) to convert gbk to utf-8.
+Currently,  [libiconv](https://www.gnu.org/software/libiconv/)  is used for gbk and utf-8 interconversion.
+
+The default codepage on the command line is 936.
 
 ------
 

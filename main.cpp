@@ -77,7 +77,8 @@ struct bloom_model {
 };
 
 // load the model's weights from a file
-bool bloom_model_load(const std::string &fname, bloom_model &model, gpt_vocab &vocab, gpt_vocab &lack_words, int n_ctx) {
+bool
+bloom_model_load(const std::string &fname, bloom_model &model, gpt_vocab &vocab, gpt_vocab &lack_words, int n_ctx) {
     printf("%s: loading model from '%s' - please wait ...\n", __func__, fname.c_str());
 
     auto fin = std::ifstream(fname, std::ios::binary);
@@ -572,6 +573,7 @@ bool bloom_model_load(const std::string &fname, bloom_model &model, gpt_vocab &v
             printf(" done\n");
 
             printf("%s: model size = %8.2f MB / num tensors = %d\n", __func__, total_size / 1024.0 / 1024.0, n_tensors);
+            printf("\n");
         }
 
         fin.close();
@@ -849,6 +851,7 @@ bool bloom_eval(
 #include <windows.h>
 #include <locale>
 #include <codecvt>
+#include <iostream>
 
 #endif
 
@@ -857,7 +860,8 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
 //    SetConsoleOutputCP(65001);
 #endif
-    system("chcp 65001");
+    system("chcp 936");
+//    setlocale(LC_ALL, "Chinese_China");
 
     ggml_time_init();
     const int64_t t_main_start_us = ggml_time_us();
@@ -865,7 +869,7 @@ int main(int argc, char **argv) {
     gpt_params params;
 //    params.model = "models/ggml-model-bloomz-396m-zh-f16.bin";
     params.model = "models/ggml-model-bloom-396m-chat-f16.bin";
-    params.prompt = "面包的烘焙制作流程";
+//    params.prompt = "面包的烘焙制作流程";
 //    params.prompt = "面包的制作流程";
 
     if (gpt_params_parse(argc, argv, params) == false) {
@@ -876,12 +880,12 @@ int main(int argc, char **argv) {
         params.seed = time(NULL);
     }
 
-    printf("%s: seed = %d\n", __func__, params.seed);
-
+//    printf("%s: seed = %d\n", __func__, params.seed);
+//
     std::mt19937 rng(params.seed);
-    if (params.prompt.empty()) {
-        params.prompt = gpt_random_prompt(rng);
-    }
+//    if (params.prompt.empty()) {
+//        params.prompt = gpt_random_prompt(rng);
+//    }
 
 
 //    params.prompt = R"(// this function checks if the number n is prime
@@ -939,145 +943,172 @@ int main(int argc, char **argv) {
     vocab_all.id_to_token.insert(lack_words.id_to_token.begin(), lack_words.id_to_token.end());
     vocab_all.token_to_id.insert(lack_words.token_to_id.begin(), lack_words.token_to_id.end());
 
-    int n_past = 0;
+    bool loop = true;
+    if (params.prompt.size() > 0)
+        loop = false;
 
-    int64_t t_sample_us = 0;
-    int64_t t_predict_us = 0;
+    while (true) {
 
-    std::vector<float> logits;
+        int n_past = 0;
 
-    // tokenize the prompt
-    std::vector<gpt_vocab::id> embd_inp = ::bloom_tokenize(vocab_all, params.prompt,
-                                                           false); //TODO: set bos to true?
+        int64_t t_sample_us = 0;
+        int64_t t_predict_us = 0;
+
+        std::vector<float> logits;
+
+        if (loop) {
+            printf("Input: ");
+            std::cin >> params.prompt;
+        }
+        std::string prompt = iconv_convert("gbk", "utf-8", params.prompt);
+        if (params.prompt == "quit") {
+            break;
+        }
+
+        // tokenize the prompt
+
+        std::vector<gpt_vocab::id> embd_inp = ::bloom_tokenize(vocab_all, prompt, false); //TODO: set bos to true?
 
 //    std::vector<gpt_vocab::id> embd_inp  = {24765,373,1165,273,18263};
 
-    params.n_predict = std::min<int>(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
+        params.n_predict = std::min<int>(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
 
-    printf("\n");
-    printf("%s: prompt: '%s'\n", __func__, params.prompt.c_str());
-    printf("%s: number of tokens in prompt = %zu\n", __func__, embd_inp.size());
-    for (int i = 0; i < (int) embd_inp.size(); i++) {
+//        printf("\n");
+        printf("%s: prompt: '%s'\n", __func__, params.prompt.c_str());
+        printf("%s: number of tokens in prompt = %zu\n", __func__, embd_inp.size());
+        for (int i = 0; i < (int) embd_inp.size(); i++) {
 //        printf("%6d -> '%s'\n", embd_inp[i], vocab.id_to_token.at(embd_inp[i]).c_str());
-        std::string word = vocab_all.id_to_token[embd_inp[i]];
-        if (word == "\357\277\275") {
-            uint32_t id = embd_inp[i] + embd_inp[i + 1] * 65536;
-            word = vocab_all.id_to_token[id];
-            printf("(%d, %d) -> '%s'\n", embd_inp[i], embd_inp[i + 1], word.c_str());
-            i++;
-        } else {
-            printf("(%d) -> '%s'\n", embd_inp[i], word.c_str());
-        }
-
-    }
-    printf("\n");
-    printf("sampling parameters: temp = %f, top_k = %d, top_p = %f, repeat_last_n = %i, repeat_penalty = %f\n",
-           params.temp, params.top_k, params.top_p, params.repeat_last_n, params.repeat_penalty);
-    printf("\n\n");
-
-    std::vector<gpt_vocab::id> embd;
-
-    // determine the required inference memory per token:
-    size_t mem_per_token = 0;
-    bloom_eval(model, params.n_threads, 0, {0, 1, 2, 3}, logits, mem_per_token);
-
-    int last_n_size = params.repeat_last_n;
-    std::vector<gpt_vocab::id> last_n_tokens(last_n_size);
-    std::fill(last_n_tokens.begin(), last_n_tokens.end(), 0);
-
-    for (int i = embd.size(); i < embd_inp.size() + params.n_predict; i++) {
-        // predict
-        if (embd.size() > 0) {
-            const int64_t t_start_us = ggml_time_us();
-
-            if (!bloom_eval(model, params.n_threads, n_past, embd, logits, mem_per_token)) { // update logits
-                printf("Failed to predict\n");
-                return 1;
+            std::string word = vocab_all.id_to_token[embd_inp[i]];
+            if (word == "\357\277\275") {
+                uint32_t id = embd_inp[i] + embd_inp[i + 1] * 65536;
+                word = vocab_all.id_to_token[id];
+                word = iconv_convert("utf-8", "gbk", word);
+                printf("(%d, %d) -> '%s' ", embd_inp[i], embd_inp[i + 1], word.c_str());
+                i++;
+            } else {
+                word = iconv_convert("utf-8", "gbk", word);
+                printf("(%d) -> '%s' ", embd_inp[i], word.c_str());
             }
 
-            t_predict_us += ggml_time_us() - t_start_us;
         }
+        printf("\n");
+        printf("sampling parameters: temp = %f, top_k = %d, top_p = %f, repeat_last_n = %i, repeat_penalty = %f\n",
+               params.temp, params.top_k, params.top_p, params.repeat_last_n, params.repeat_penalty);
+//        printf("\n\n");
 
-        n_past += embd.size();
-        embd.clear();
+        std::vector<gpt_vocab::id> embd;
 
-        if (i >= embd_inp.size()) {
-            // sample next token
-            const float top_p = params.top_p;
-            const float temp = params.temp;
-            const float repeat_penalty = params.repeat_penalty;
+        // determine the required inference memory per token:
+        size_t mem_per_token = 0;
+        bloom_eval(model, params.n_threads, 0, {0, 1, 2, 3}, logits, mem_per_token);
 
-            const int n_vocab = model.hparams.n_vocab;
+        int last_n_size = params.repeat_last_n;
+        std::vector<gpt_vocab::id> last_n_tokens(last_n_size);
+        std::fill(last_n_tokens.begin(), last_n_tokens.end(), 0);
 
-            gpt_vocab::id id = 0;
+        for (int i = embd.size(); i < embd_inp.size() + params.n_predict; i++) {
+            // predict
+            if (embd.size() > 0) {
+                const int64_t t_start_us = ggml_time_us();
 
-            {
-                const int64_t t_start_sample_us = ggml_time_us();
-
-                id = bloom_sample_top_p(vocab, logits.data() + (logits.size() - n_vocab), last_n_tokens, repeat_penalty,
-                                        top_p, temp, rng);
-
-                // // print
-                // printf("\ngenerated token: '%s' (%d)\n", vocab.id_to_token[id].c_str(), id);
-
-                last_n_tokens.erase(last_n_tokens.begin());
-                last_n_tokens.push_back(id);
-
-                t_sample_us += ggml_time_us() - t_start_sample_us;
-            }
-
-            // add it to the context
-            embd.push_back(id);
-        } else {
-            // if here, it means we are still processing the input prompt
-            for (int k = i; k < embd_inp.size(); k++) {
-                embd.push_back(embd_inp[k]);
-                last_n_tokens.erase(last_n_tokens.begin());
-                last_n_tokens.push_back(embd_inp[k]);
-                if (embd.size() > params.n_batch) {
-                    break;
+                if (!bloom_eval(model, params.n_threads, n_past, embd, logits, mem_per_token)) { // update logits
+                    printf("Failed to predict\n");
+                    return 1;
                 }
-            }
-            i += embd.size() - 1;
-        }
 
-        // display text
+                t_predict_us += ggml_time_us() - t_start_us;
+            }
+
+            n_past += embd.size();
+            embd.clear();
+
+            if (i >= embd_inp.size()) {
+                // sample next token
+                const float top_p = params.top_p;
+                const float temp = params.temp;
+                const float repeat_penalty = params.repeat_penalty;
+
+                const int n_vocab = model.hparams.n_vocab;
+
+                gpt_vocab::id id = 0;
+
+                {
+                    const int64_t t_start_sample_us = ggml_time_us();
+
+                    id = bloom_sample_top_p(vocab, logits.data() + (logits.size() - n_vocab), last_n_tokens,
+                                            repeat_penalty,
+                                            top_p, temp, rng);
+
+                    // // print
+                    // printf("\ngenerated token: '%s' (%d)\n", vocab.id_to_token[id].c_str(), id);
+
+                    last_n_tokens.erase(last_n_tokens.begin());
+                    last_n_tokens.push_back(id);
+
+                    t_sample_us += ggml_time_us() - t_start_sample_us;
+                }
+
+                // add it to the context
+                embd.push_back(id);
+            } else {
+                // if here, it means we are still processing the input prompt
+                for (int k = i; k < embd_inp.size(); k++) {
+                    embd.push_back(embd_inp[k]);
+                    last_n_tokens.erase(last_n_tokens.begin());
+                    last_n_tokens.push_back(embd_inp[k]);
+                    if (embd.size() > params.n_batch) {
+                        break;
+                    }
+                }
+                i += embd.size() - 1;
+            }
+
+//    setlocale(LC_ALL, "Chinese_China");
+
+            // display text
 //        for (auto id: embd) {
 //            printf("%s(%d)", vocab.id_to_token[id].c_str(), id);
 //        }
-        for (int i = 0; i < embd.size(); i++) {
-            std::string word = vocab_all.id_to_token[embd[i]];
-            if (word == "\357\277\275") {
-                uint32_t id = embd[i] + embd[i + 1] * 65536;
-                word = vocab_all.id_to_token[id];
+            for (int i = 0; i < embd.size(); i++) {
+                std::string word = vocab_all.id_to_token[embd[i]];
+                if (word == "\357\277\275") {
+                    uint32_t id = embd[i] + embd[i + 1] * 65536;
+                    word = vocab_all.id_to_token[id];
+                    word = iconv_convert("utf-8", "gbk", word);
 //                printf("%s(%d, %d)", word.c_str(), embd[i], embd[i + 1]);
-                printf("%s", word.c_str());
-                i++;
-            } else {
+                    printf("%s", word.c_str());
+                    i++;
+                } else {
 //                printf("%s(%d)",word.c_str(), embd[i]);
-                printf("%s", word.c_str());
+                    word = iconv_convert("utf-8", "gbk", word);
+                    printf("%s", word.c_str());
+                }
+            }
+            fflush(stdout);
+
+            // end of text token
+            if (embd.back() == 2) {
+                printf(" [end of text]\n");
+                break;
             }
         }
-        fflush(stdout);
 
-        // end of text token
-        if (embd.back() == 2) {
-            printf(" [end of text]\n");
+        // report timing
+        {
+            const int64_t t_main_end_us = ggml_time_us();
+
+//            printf("\n\n");
+            printf("%s: mem per token = %8zu bytes\n", __func__, mem_per_token);
+            printf("%s:     load time = %8.2f ms\n", __func__, t_load_us / 1000.0f);
+            printf("%s:   sample time = %8.2f ms\n", __func__, t_sample_us / 1000.0f);
+            printf("%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us / 1000.0f,
+                   t_predict_us / 1000.0f / n_past);
+            printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us) / 1000.0f);
+            printf("\n");
+        }
+        if (!loop) {
             break;
         }
-    }
-
-    // report timing
-    {
-        const int64_t t_main_end_us = ggml_time_us();
-
-        printf("\n\n");
-        printf("%s: mem per token = %8zu bytes\n", __func__, mem_per_token);
-        printf("%s:     load time = %8.2f ms\n", __func__, t_load_us / 1000.0f);
-        printf("%s:   sample time = %8.2f ms\n", __func__, t_sample_us / 1000.0f);
-        printf("%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us / 1000.0f,
-               t_predict_us / 1000.0f / n_past);
-        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us) / 1000.0f);
     }
 
     ggml_free(model.ctx);

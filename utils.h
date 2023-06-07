@@ -103,3 +103,5 @@ gpt_vocab::id bloom_sample_top_p(
 
 size_t ggml_quantize_q4_0(float * src, void * dst, int n, int k, int qk, int64_t * hist);
 size_t ggml_quantize_q4_1(float * src, void * dst, int n, int k, int qk, int64_t * hist);
+
+std::string iconv_convert(const char *from_charset, const char *to_charset, std::string in);

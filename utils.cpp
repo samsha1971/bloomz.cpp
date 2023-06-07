@@ -6,7 +6,9 @@
 #include <regex>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
+
 #include <malloc.h> // using malloc.h with MSC/MINGW
+
 #elif !defined(__FreeBSD__) && !defined(__NetBSD__)
 #include <alloca.h>
 #endif
@@ -110,14 +112,7 @@ bool gpt_params_parse(int argc, char **argv, gpt_params &params) {
         } else if (arg == "-t" || arg == "--threads") {
             params.n_threads = std::stoi(argv[++i]);
         } else if (arg == "-p" || arg == "--prompt") {
-            params.prompt = (argv[++i]); // 输入为utf-8字符串，不用转码
-        } else if (arg == "-g" || arg == "--gbk") {
-#if defined(_MSC_VER) || defined(__MINGW32__)
-//            params.prompt = ascii_to_utf8(argv[++i]); // 输入为ascii码，需要转码
-            params.prompt = iconv_convert("gbk","utf-8",argv[++i]); // 输入为ascii码，需要转码
-#else
-            params.prompt = (argv[++i]);
-#endif
+            params.prompt = (argv[++i]); // 输入为gbk字符串，不用转码
         } else if (arg == "-n" || arg == "--n_predict") {
             params.n_predict = std::stoi(argv[++i]);
         } else if (arg == "--top_k") {
@@ -387,10 +382,9 @@ std::vector<gpt_vocab::id> bloom_tokenize(const gpt_vocab &vocab, const std::str
         }
 
         if (t / 65536 != 0) {
-            res.push_back((uint32_t)(t % 65536));
-            res.push_back((uint32_t)(t / 65536));
-        }
-        else{
+            res.push_back((uint32_t) (t % 65536));
+            res.push_back((uint32_t) (t / 65536));
+        } else {
             res.push_back(t);
         }
 
