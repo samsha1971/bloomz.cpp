@@ -25,7 +25,7 @@ std::string iconv_convert(const char *from_charset, const char *to_charset, std:
     if (cd == 0)
         return nullptr;
     char *in_buf = const_cast<char *>(in.c_str());
-    size_t in_len = strlen(in_buf);
+    size_t in_len = in.size();
     size_t out_len = in_len * 5;
     char *out_buf = static_cast<char *>(malloc(out_len));
     memset(out_buf, 0, out_len);

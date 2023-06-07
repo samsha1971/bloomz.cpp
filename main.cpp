@@ -852,16 +852,19 @@ bool bloom_eval(
 #include <locale>
 #include <codecvt>
 #include <iostream>
+#include <fcntl.h>
 
 #endif
 
 int main(int argc, char **argv) {
 
 #ifdef _WIN32
-//    SetConsoleOutputCP(65001);
+    SetConsoleOutputCP(65001);
+//    system("chcp 65001");
+#else
+    setlocale(LC_ALL, "Chinese_China");
 #endif
-    system("chcp 936");
-//    setlocale(LC_ALL, "Chinese_China");
+    _setmode(_fileno(stdin), _O_U16TEXT);
 
     ggml_time_init();
     const int64_t t_main_start_us = ggml_time_us();
@@ -958,16 +961,23 @@ int main(int argc, char **argv) {
 
         if (loop) {
             printf("Input: ");
-            std::cin >> params.prompt;
+            std::wstring input;
+            std::wcin >> input;
+            std::string s;
+            s.append((char *) input.c_str(), input.size() * 2);
+            params.prompt = iconv_convert("wchar_t", "utf-8", s);
+            if (params.prompt == "quit" || params.prompt == "exit") {
+                break;
+            }
+        } else {
+            params.prompt = iconv_convert("gbk", "utf-8", params.prompt);
         }
-        std::string prompt = iconv_convert("gbk", "utf-8", params.prompt);
-        if (params.prompt == "quit") {
-            break;
-        }
+
 
         // tokenize the prompt
 
-        std::vector<gpt_vocab::id> embd_inp = ::bloom_tokenize(vocab_all, prompt, false); //TODO: set bos to true?
+        std::vector<gpt_vocab::id> embd_inp = ::bloom_tokenize(vocab_all, params.prompt,
+                                                               false); //TODO: set bos to true?
 
 //    std::vector<gpt_vocab::id> embd_inp  = {24765,373,1165,273,18263};
 
@@ -982,12 +992,12 @@ int main(int argc, char **argv) {
             if (word == "\357\277\275") {
                 uint32_t id = embd_inp[i] + embd_inp[i + 1] * 65536;
                 word = vocab_all.id_to_token[id];
-                word = iconv_convert("utf-8", "gbk", word);
-                printf("(%d, %d) -> '%s' ", embd_inp[i], embd_inp[i + 1], word.c_str());
+//                word = iconv_convert("utf-8", "gbk", word);
+                printf("%s(%d, %d) ", word.c_str(), embd_inp[i], embd_inp[i + 1]);
                 i++;
             } else {
-                word = iconv_convert("utf-8", "gbk", word);
-                printf("(%d) -> '%s' ", embd_inp[i], word.c_str());
+//                word = iconv_convert("utf-8", "gbk", word);
+                printf("%s(%d)", word.c_str(), embd_inp[i]);
             }
 
         }
@@ -1074,13 +1084,13 @@ int main(int argc, char **argv) {
                 if (word == "\357\277\275") {
                     uint32_t id = embd[i] + embd[i + 1] * 65536;
                     word = vocab_all.id_to_token[id];
-                    word = iconv_convert("utf-8", "gbk", word);
+//                    word = iconv_convert("utf-8", "gbk", word);
 //                printf("%s(%d, %d)", word.c_str(), embd[i], embd[i + 1]);
                     printf("%s", word.c_str());
                     i++;
                 } else {
 //                printf("%s(%d)",word.c_str(), embd[i]);
-                    word = iconv_convert("utf-8", "gbk", word);
+//                    word = iconv_convert("utf-8", "gbk", word);
                     printf("%s", word.c_str());
                 }
             }
