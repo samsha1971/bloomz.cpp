@@ -10,6 +10,10 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <locale>
+#include <codecvt>
+#include <iostream>
+#include <fcntl.h>
 
 #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__))
 #include <signal.h>
@@ -849,10 +853,7 @@ bool bloom_eval(
 #ifdef _WIN32
 
 #include <windows.h>
-#include <locale>
-#include <codecvt>
-#include <iostream>
-#include <fcntl.h>
+
 
 #endif
 
@@ -861,11 +862,11 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(65001);
 //    system("chcp 65001");
-#else
-    setlocale(LC_ALL, "Chinese_China");
-#endif
     _setmode(_fileno(stdin), _O_U16TEXT);
-
+#else
+    // setlocale(LC_ALL, "zh_CN.GBK");
+#endif
+    
     ggml_time_init();
     const int64_t t_main_start_us = ggml_time_us();
 
@@ -961,16 +962,32 @@ int main(int argc, char **argv) {
 
         if (loop) {
             printf("Input: ");
-            std::wstring input;
-            std::wcin >> input;
-            std::string s;
-            s.append((char *) input.c_str(), input.size() * 2);
-            params.prompt = iconv_convert("wchar_t", "utf-8", s);
+#ifdef _WIN32
+            wchar_t buf[255] = {0};
+            std::wcin.getline(buf,255);
+            std::string input((char *)buf,wcslen(buf) * 2);
+            std::wcin.get();
+            std::wcin.clear();
+//            std::string s;
+//            s.append((char *) input.c_str(), input.size() * 2);
+            params.prompt = iconv_convert("wchar_t", "utf-8", input);
+#else
+            char buf[255] = {0};
+            std::cin.getline(buf,255);
+            std::string input((char *)buf,strlen(buf));
+//            std::cin.get();
+            std::cin.clear();
+            params.prompt = input;
+#endif
             if (params.prompt == "quit" || params.prompt == "exit") {
                 break;
             }
         } else {
+#ifdef _WIN32            
             params.prompt = iconv_convert("gbk", "utf-8", params.prompt);
+#else
+
+#endif
         }
 
 
@@ -992,11 +1009,15 @@ int main(int argc, char **argv) {
             if (word == "\357\277\275") {
                 uint32_t id = embd_inp[i] + embd_inp[i + 1] * 65536;
                 word = vocab_all.id_to_token[id];
-//                word = iconv_convert("utf-8", "gbk", word);
+#ifndef _WIN32                
+                // word = iconv_convert("utf-8", "gbk", word);
+#endif
                 printf("%s(%d, %d) ", word.c_str(), embd_inp[i], embd_inp[i + 1]);
                 i++;
             } else {
-//                word = iconv_convert("utf-8", "gbk", word);
+#ifndef _WIN32                
+                // word = iconv_convert("utf-8", "gbk", word);
+#endif
                 printf("%s(%d)", word.c_str(), embd_inp[i]);
             }
 
@@ -1084,13 +1105,17 @@ int main(int argc, char **argv) {
                 if (word == "\357\277\275") {
                     uint32_t id = embd[i] + embd[i + 1] * 65536;
                     word = vocab_all.id_to_token[id];
-//                    word = iconv_convert("utf-8", "gbk", word);
+#ifndef _WIN32                
+                    // word = iconv_convert("utf-8", "gbk", word);
+#endif
 //                printf("%s(%d, %d)", word.c_str(), embd[i], embd[i + 1]);
                     printf("%s", word.c_str());
                     i++;
                 } else {
 //                printf("%s(%d)",word.c_str(), embd[i]);
-//                    word = iconv_convert("utf-8", "gbk", word);
+#ifndef _WIN32                
+                    // word = iconv_convert("utf-8", "gbk", word);
+#endif
                     printf("%s", word.c_str());
                 }
             }
