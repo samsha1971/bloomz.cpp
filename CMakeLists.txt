@@ -5,8 +5,8 @@ message(NOTICE "${CMAKE_COMPILER_IS_GNUCC}")
 
 set (CMAKE_CXX_STANDARD 11)
 IF(CMAKE_COMPILER_IS_GNUCC)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -DNDEBUG -pthread -fPIC -g -O0")
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -DNDEBUG -pthread -fPIC -g -O0")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -DNDEBUG -fPIC -g -pthread -mfma -mf16c -mavx -mavx2 -O0")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -DNDEBUG -fPIC -g -pthread -mfma -mf16c -mavx -mavx2 -O0")
 ENDIF(CMAKE_COMPILER_IS_GNUCC)
 
 include(CTest)
