@@ -968,8 +968,6 @@ int main(int argc, char **argv) {
             std::string input((char *)buf,wcslen(buf) * 2);
             std::wcin.get();
             std::wcin.clear();
-//            std::string s;
-//            s.append((char *) input.c_str(), input.size() * 2);
             params.prompt = iconv_convert("wchar_t", "utf-8", input);
 #else
             char buf[255] = {0};
