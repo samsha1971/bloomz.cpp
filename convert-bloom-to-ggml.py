@@ -96,6 +96,8 @@ for word in words:
         tks = tokenizer.tokenize(word)
         if (len(tks) == 2):
             lack_words.append(" ".join(tks))
+        else:
+            print("Lack ignore ", word, tks)
 
 hparams["lack_words_size"] = len(lack_words)
 
@@ -143,11 +145,14 @@ for i in range(hparams["vocab_size"]):
 for lack_word in lack_words:
     tokens = lack_word.split(" ")   
     ids = tokenizer.convert_tokens_to_ids(tokens)
-    id = struct.pack('2H', *ids)
-    fout.write(id)
-    text = tokenizer.decode(ids).encode('utf-8')
-    fout.write(struct.pack("i", len(text)))
-    fout.write(text)
+    if ids[0] <= 0xFFFF and ids[1] <= 0xFFFF:
+        id = struct.pack('2H', *ids)
+        fout.write(id)
+        text = tokenizer.decode(ids).encode('utf-8')
+        fout.write(struct.pack("i", len(text)))
+        fout.write(text)
+    else:
+        print("Write ignore ", ids)
 
 model = BloomForCausalLM.from_pretrained(
     model_name,
