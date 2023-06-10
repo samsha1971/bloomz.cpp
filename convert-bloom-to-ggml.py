@@ -94,7 +94,7 @@ words = get_all_chinese()
 for word in words:
     if word not in vocab_words:
         tks = tokenizer.tokenize(word)
-        if (len(tks) == 2):
+        if (len(tks) <= 2):
             lack_words.append(" ".join(tks))
         else:
             print("Lack ignore ", word, tks)
@@ -143,8 +143,10 @@ for i in range(hparams["vocab_size"]):
     fout.write(text)
 
 for lack_word in lack_words:
-    tokens = lack_word.split(" ")   
+    tokens = lack_word.split(" ")
     ids = tokenizer.convert_tokens_to_ids(tokens)
+    if len(ids) == 1:
+        ids.append(0)
     if ids[0] <= 0xFFFF and ids[1] <= 0xFFFF:
         id = struct.pack('2H', *ids)
         fout.write(id)
@@ -152,7 +154,8 @@ for lack_word in lack_words:
         fout.write(struct.pack("i", len(text)))
         fout.write(text)
     else:
-        print("Write ignore ", ids)
+        text = tokenizer.decode(ids).encode('utf-8')
+        print("Write ignore ", text, ids)
 
 model = BloomForCausalLM.from_pretrained(
     model_name,
